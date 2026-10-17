@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createPlateDrive, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
+import { createHop, createPlateDrive, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -245,7 +245,7 @@ describe("createPlateDrive", () => {
   });
 
   it("exports the pulse constants", () => {
-    expect([K_PULSE, PULSE_TAU, PULSE_BASE, DRIVE_PEAK]).toEqual([1, 0.12, 0.4, 3]);
+    expect([K_PULSE, PULSE_TAU, PULSE_BASE, DRIVE_PEAK, DRIVE_KNEE]).toEqual([1, 0.12, 0.4, 3, 1]);
   });
 
   it("pulses the drive on a hit by 0.4 + 0.6·weight, decaying with τ 0.12 s, and to 0 on silence", () => {
@@ -270,13 +270,37 @@ describe("createPlateDrive", () => {
     }
   });
 
-  it("caps the pulsed drive at 3·reactivity", () => {
+  it("keeps room for the pulse on loud songs: the base kneels toward 1.5·reactivity, so a full pulse doubles it within 3·reactivity", () => {
     for (const react of [0.5, 2]) {
-      const d = createPlateDrive();
-      const loud = audio({ midAtt: 2, rms: 1 }); // base 2.5·reactivity
-      for (let i = 0; i < 240; i++) d.step(loud, 0, react, true, 1, NONE, DT);
-      expect(d.step(loud, 0, react, true, 1, hit(true, 1), DT).drive).toBeCloseTo(3 * react, 9);
+      /** @param {number} rms */
+      const settle = (rms) => {
+        const d = createPlateDrive();
+        const au = audio({ midAtt: 2, rms }); // base 1 + 4·rms (·reactivity), up to 2.5
+        let s = d.step(au, 0, react, true, 1, NONE, DT);
+        for (let i = 0; i < 240; i++) s = d.step(au, 0, react, true, 1, NONE, DT);
+        const quiet = s.drive;
+        return { quiet, hit: d.step(au, 0, react, true, 1, hit(true, 1), DT).drive };
+      };
+      let last = 0;
+      for (const rms of [0, 0.05, 0.125, 0.25, 0.375]) {
+        const { quiet, hit: loud } = settle(rms);
+        const base = Math.min(1 + 4 * rms, 2.5);
+        if (base <= 1) expect(quiet).toBeCloseTo(base * react, 6); // untouched up to the knee
+        else expect(quiet).toBeLessThan(Math.min(base, 1.5) * react);
+        expect(quiet).toBeGreaterThan(last); // still louder for a louder song
+        last = quiet;
+        expect(loud).toBeCloseTo(2 * quiet, 6); // never clipped
+        expect(loud).toBeLessThanOrEqual(3 * react + 1e-9);
+      }
     }
+  });
+
+  it("does not kneel the base with pulse gain 0", () => {
+    const d = createPlateDrive();
+    const loud = audio({ midAtt: 2, rms: 1 });
+    let s = d.step(loud, 0, 2, true, 0, NONE, DT);
+    for (let i = 0; i < 240; i++) s = d.step(loud, 0, 2, true, 0, hit(i % 20 === 0, 1), DT);
+    expect(s.drive).toBeCloseTo(5, 6);
   });
 
   it("reproduces the unpulsed drive exactly with pulse gain 0", () => {
