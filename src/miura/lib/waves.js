@@ -6,6 +6,7 @@
  * distances are measured in visible-sheet heights, so the look does not depend on the window.
  *
  * The field is analytic in time: a wave is dated from the onset itself (time.now - onsetAge)
+ * (or now, when the onset carries no usable age)
  * and evaluated at the frame's time, so it is identical at 60 and 120 Hz.
  *
  * contribution(r, age) = amp * exp(-((r - c age) / WIDTH)^2) * exp(-age / DECAY), c = 0.9 speed
@@ -17,6 +18,11 @@ import { hash01 } from "./hash.js";
 export const MAX_WAVES = 8;
 /** Waves older than this (s) are skipped. */
 export const WAVE_LIFE = 4;
+/**
+ * An onset frame's onsetAge is about a frame; more than this means the source gave no usable age
+ * (the API caps it at 10 s, which some sources report on every frame), so the wave starts now.
+ */
+export const MAX_ONSET_AGE = 0.5;
 /** Weakest onset that launches a wave. */
 export const MIN_STRENGTH = 0.15;
 const WIDTH = 0.08;
@@ -67,7 +73,7 @@ export function createWaves() {
     onset(a, now, reactivity, waveEff, balance, onsetCount) {
       if (!a.onset || a.silent || !(a.onsetStrength > MIN_STRENGTH)) return false;
       const s = w.next;
-      t0[s] = now - a.onsetAge;
+      t0[s] = a.onsetAge <= MAX_ONSET_AGE ? now - a.onsetAge : now;
       amp[s] = 0.35 * a.onsetStrength * reactivity * waveEff;
       ox[s] = waveOriginX(balance);
       oy[s] = 0.3 + 0.4 * hash01(onsetCount);

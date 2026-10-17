@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createWaves, MAX_WAVES, WAVE_LIFE, waveOriginX } from "./waves.js";
+import { createWaves, MAX_ONSET_AGE, MAX_WAVES, WAVE_LIFE, waveOriginX } from "./waves.js";
 import { stereoImage } from "./stereo.js";
 
 /** A minimal audio-like record for `onset`. */
@@ -21,6 +21,16 @@ describe("createWaves", () => {
     const w = createWaves();
     w.onset(hit(1, 0.04), 3, 1, 1, 0, 0);
     expect(w.t0[0]).toBeCloseTo(2.96, 6);
+  });
+
+  it("starts a wave now when the onset carries no usable age (the 10 s cap)", () => {
+    const w = createWaves();
+    w.onset(hit(1, 10), 3, 1, 1, 0, 0);
+    expect(w.t0[0]).toBe(3);
+    w.onset(hit(1, MAX_ONSET_AGE + 0.01), 3, 1, 1, 0, 1);
+    expect(w.t0[1]).toBe(3);
+    w.onset(hit(1, MAX_ONSET_AGE), 3, 1, 1, 0, 2);
+    expect(w.t0[2]).toBeCloseTo(3 - MAX_ONSET_AGE, 6);
   });
 
   it("scales the amplitude by strength, reactivity and the wave factor", () => {
