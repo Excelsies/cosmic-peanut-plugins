@@ -73,6 +73,24 @@
         { "id": "relayout", "type": "select", "label": "Re-layout", "options": ["8 bars", "16 bars", "32 bars", "never"], "default": "8 bars" },
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
       ]
+    },
+    {
+      "id": "soapfilm",
+      "name": "Soapfilm",
+      "description": "A draining soap film fills the window in true thin-film interference colours: bass breathes the bands through the colour order, loud passages stir them into eddies, and every hit sends a plume of fresh film rising from the bottom.",
+      "author": "Fieldwork",
+      "entry": "src/soapfilm.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/soapfilm.jpg",
+      "params": [
+        { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["velvet", "studio", "none"], "default": "velvet" },
+        { "id": "light", "type": "select", "label": "Light", "options": ["softbox", "sky", "warm"], "default": "softbox" },
+        { "id": "thickness", "type": "number", "label": "Thickness", "min": 0.5, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "swirl", "type": "number", "label": "Swirl", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "drainage", "type": "number", "label": "Drainage", "min": 0.2, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "redip", "type": "select", "label": "Re-dip", "options": ["16 bars", "32 bars", "when black"], "default": "16 bars" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
+      ]
     }
   ]
 }
