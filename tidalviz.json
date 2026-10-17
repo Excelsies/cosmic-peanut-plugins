@@ -1,0 +1,23 @@
+{
+  "apiVersion": 1,
+  "visualizers": [
+    {
+      "id": "murmuration",
+      "name": "Murmuration",
+      "description": "Thousands of starlings wheel as one silhouette over a dusk sky: kicks squeeze the flock dark, strong hits send a falcon diving through.",
+      "author": "Fieldwork",
+      "entry": "src/murmuration.js",
+      "renderer": "three",
+      "libs": ["three"],
+      "thumbnail": "thumbs/murmuration.jpg",
+      "params": [
+        { "id": "sky", "type": "select", "label": "Sky", "options": ["dusk", "overcast", "rose", "none"], "default": "dusk" },
+        { "id": "ink", "type": "color", "label": "Ink (sky none)", "default": "#ece6da" },
+        { "id": "flock", "type": "select", "label": "Flock size", "options": ["2000", "4000", "6000"], "default": "4000" },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "falcon", "type": "boolean", "label": "Falcon", "default": true },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
+      ]
+    }
+  ]
+}
