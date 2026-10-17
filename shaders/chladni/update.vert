@@ -15,7 +15,7 @@ uniform vec4 u_modeB;  // figure B
 uniform vec4 u_field;  // signA, signB, blend A->B, aspect (width / height)
 uniform vec4 u_drive;  // drive, fizz, dt, U_FLOOR
 uniform vec4 u_tilt;   // tiltX, tiltY (zw unused)
-uniform vec4 u_hop;    // hop vz0, scatter, share of grounded grains that launch (first step after a hop, else 0), 0
+uniform vec4 u_hop;    // hop vz0, scatter, share of grains up to which to launch, share already launched (first step after a hop or grow, else 0)
 uniform vec4 u_k;      // K_DRIFT, K_SHAKE, K_FIZZ, G_TILT
 uniform vec4 u_k2;     // DAMPING, AIR_DRAG, RESTITUTION, GRAVITY
 uniform uint u_step;   // global step counter (noise seed)
@@ -57,11 +57,13 @@ void main() {
   if (u_hop.x > 0.0 && !airborne) {
     // Beat hit: a share of the grounded grains hops, each a little differently. The share is a
     // hashed threshold per grain and hop, so a hop that grows (same u_seq, larger share) launches
-    // only the grains between the old and the new share.
+    // only the grains between the share already launched and the new one: a grain from the first
+    // launch that has landed again must not hop twice.
     uint h = pcg(id ^ pcg(u_seq * 2654435769u + 1u));
     uint h1 = pcg(h);
     uint h2 = pcg(h1);
-    if (unit(pcg(h2)) < u_hop.z) {
+    float r = unit(pcg(h2));
+    if (r >= u_hop.w && r < u_hop.z) {
       vz = u_hop.x * (0.8 + 0.4 * unit(h));
       v += (vec2(unit(h1), unit(h2)) * 2.0 - 1.0) * u_hop.y;
       airborne = true;

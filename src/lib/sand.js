@@ -80,19 +80,21 @@ export function flightTime(vz0) {
 /**
  * Hit → hop. Every hit (lib/hits.js) launches F_MIN + (1 − F_MIN)·w of the grounded grains at
  * hopVz0(hop, w) with lateral scatter SCATTER·hop·w²; a grow re-sends the bigger hop under the
- * same `seq`, so the shader launches only the extra grains. Hits over W_HAZE also raise the dust
+ * same `seq` with `launched`, the share already sent, so the shader launches only the grains
+ * between the two shares (a short flight may have landed, and must not hop twice). Hits over W_HAZE also raise the dust
  * haze to HAZE_PEAK·(w − W_HAZE)/(1 − W_HAZE), held through the weight window and then decaying
  * with τ HAZE_TAU, through the photosensitivity limiter (at most 3 rises per second under reduce
  * flashing). A bright hit the limiter refuses still hops, at weight W_HAZE and with no haze rise.
  * `step` returns the same object every call: `impulse` (vz0, non-zero only on hop frames),
- * `scatter`, `fraction`, `seq` (hop counter, seeds the launch hash) and `haze` (0–1).
+ * `scatter`, `fraction`, `launched`, `seq` (hop counter, seeds the launch hash) and `haze` (0–1).
  */
 export function createHop() {
   const limiter = createFlashLimiter();
   let env = 0;
   let hold = 0;
   let since = Infinity;
-  const out = { impulse: 0, scatter: 0, fraction: 0, seq: 0, haze: 0 };
+  let sent = 0;
+  const out = { impulse: 0, scatter: 0, fraction: 0, launched: 0, seq: 0, haze: 0 };
   return {
     /**
      * @param {{ fire: boolean, grow: boolean, weight: number }} hit createHits().out
@@ -109,6 +111,7 @@ export function createHop() {
         out.seq++;
         since = 0;
         hold = 0;
+        sent = 0;
       }
       const hazeT = on && w > W_HAZE ? (HAZE_PEAK * (w - W_HAZE)) / (1 - W_HAZE) : 0;
       if (since > WEIGHT_WIN + 1e-9) hold = 0;
@@ -121,6 +124,8 @@ export function createHop() {
       }
       out.impulse = on ? hopVz0(hop, w) : 0;
       out.fraction = on ? F_MIN + (1 - F_MIN) * w : 0;
+      out.launched = on ? sent : 0;
+      if (out.fraction > sent) sent = out.fraction;
       out.scatter = on ? SCATTER * hop * w * w : 0;
       out.haze = hop > 0 ? env : 0;
       return out;

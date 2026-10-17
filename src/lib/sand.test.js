@@ -96,14 +96,18 @@ describe("hop", () => {
   it("counts a new hop only on a fire; a grow re-sends a bigger hop under the same seq", () => {
     const hop = createHop();
     const a = hop.step(hit(true, 0.3), 1, DT, true);
-    expect([a.seq, a.fraction]).toEqual([1, expect.closeTo(0.51, 9)]);
+    expect([a.seq, a.fraction, a.launched]).toEqual([1, expect.closeTo(0.51, 9), 0]);
     const b = hop.step(hit(false, 0.6, true), 1, DT, true);
     expect(b).toBe(a);
     expect(b.seq).toBe(1);
     expect(b.fraction).toBeCloseTo(0.72, 9);
     expect(b.impulse).toBeCloseTo(hopVz0(1, 0.6), 9);
+    // The grow names the share already launched, so only the grains between the two shares go up
+    // (a short flight may have landed already: they must not hop twice).
+    expect(b.launched).toBeCloseTo(0.51, 9);
+    expect(hop.step(hit(false, 0.9, true), 1, DT, true).launched).toBeCloseTo(0.72, 9);
     const c = hop.step(NONE, 1, DT, true);
-    expect([c.impulse, c.scatter, c.fraction, c.seq]).toEqual([0, 0, 0, 1]);
+    expect([c.impulse, c.scatter, c.fraction, c.seq, c.launched]).toEqual([0, 0, 0, 1, 0]);
     for (let i = 0; i < 20; i++) hop.step(NONE, 1, DT, true);
     expect(hop.step(hit(true, 0.1), 1, DT, true).seq).toBe(2);
   });

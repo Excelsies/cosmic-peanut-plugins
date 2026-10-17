@@ -152,10 +152,11 @@ export default async function create(ctx) {
   const k2 = new Float32Array([DAMPING, AIR_DRAG, RESTITUTION, GRAVITY]);
   let stepCount = 0;
   // A hop waits here until the next simulation step (a 144 Hz frame may run none); hops and grows
-  // that arrive meanwhile merge by max.
+  // that arrive meanwhile merge by max (the share already launched by min).
   let pendingVz = 0;
   let pendingScatter = 0;
   let pendingFraction = 0;
+  let pendingLaunched = 0;
   let seq = 0;
 
   return {
@@ -174,6 +175,7 @@ export default async function create(ctx) {
       const hp = hop.step(hit, res.hop, dt, ctx.reduceFlashing);
       const pd = plateDrive.step(audio, balance, res.reactivity, res.bassTilt, res.pulse, hit, dt);
       if (hp.impulse > 0) {
+        pendingLaunched = pendingFraction > 0 ? Math.min(pendingLaunched, hp.launched) : hp.launched;
         pendingVz = Math.max(pendingVz, hp.impulse);
         pendingScatter = Math.max(pendingScatter, hp.scatter);
         pendingFraction = Math.max(pendingFraction, hp.fraction);
@@ -210,9 +212,11 @@ export default async function create(ctx) {
           hopU[0] = pendingVz;
           hopU[1] = pendingScatter;
           hopU[2] = pendingFraction;
+          hopU[3] = pendingLaunched;
           pendingVz = 0;
           pendingScatter = 0;
           pendingFraction = 0;
+          pendingLaunched = 0;
           gl.uniform4fv(u.u_hop, hopU);
           gl.uniform1ui(u.u_step, stepCount++ >>> 0);
           const next = 1 - cur;
