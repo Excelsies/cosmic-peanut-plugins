@@ -24,7 +24,7 @@ import { createProgram } from "./lib/gl.js";
 import { resolveParams } from "./lib/kelir-params.js";
 import { createLamp } from "./lib/lamp.js";
 import { placeSilhouette } from "./lib/place.js";
-import { MAX_RECORDS, RECORD_FLOATS, buildCast } from "./lib/puppets.js";
+import { MAX_RECORDS, RECORD_FLOATS, boneBase, buildCast } from "./lib/puppets.js";
 import { createPose, createRig, poseSilhouette, rewriteRods, silhouetteBounds } from "./lib/rig.js";
 import { PALETTES, screenColours } from "./lib/screens.js";
 import { createStage, penumbra } from "./lib/stage.js";
@@ -94,7 +94,7 @@ export default async function create(ctx) {
   const p = resolveParams(ctx.params, ctx.reduceMotion, {});
   // Per-instance uniforms (up to 3 visible silhouettes, packed in draw order).
   const boxes = new Float32Array(12);
-  const ranges = new Int32Array(6);
+  const ranges = new Int32Array(9);
   const looks = new Float32Array(9);
   const spacing = new Float32Array(3);
   const colours = new Float32Array(9);
@@ -125,9 +125,11 @@ export default async function create(ctx) {
         if (i < 2) rewriteRods(table, cast.rods, rig, i);
         const w = Math.max(0.75, look.w * maskScale);
         const pxPerUnit = pose.s * maskH * Math.min(1, Math.abs(pose.fx));
-        silhouetteBounds(table, cast.ranges[i * 2], cast.ranges[i * 2 + 1], rig, (w * 1.05 + 1) / maskH, boxes, n * 4);
-        ranges[n * 2] = cast.ranges[i * 2];
-        ranges[n * 2 + 1] = cast.ranges[i * 2 + 1];
+        const pad = (w * 1.05 + 1) / maskH;
+        silhouetteBounds(table, cast.ranges[i * 2], cast.ranges[i * 2 + 1], rig, boneBase(i), pad, boxes, n * 4);
+        ranges[n * 3] = cast.ranges[i * 2];
+        ranges[n * 3 + 1] = cast.ranges[i * 2 + 1];
+        ranges[n * 3 + 2] = boneBase(i);
         looks[n * 3] = pxPerUnit;
         looks[n * 3 + 1] = w;
         looks[n * 3 + 2] = s.opacity;
@@ -149,7 +151,7 @@ export default async function create(ctx) {
         gl.uniform1f(mu.u_aspect, aspect);
         gl.uniform4fv(mu.u_prims, table);
         gl.uniformMatrix3fv(mu.u_bones, false, rig.inv);
-        gl.uniform2iv(mu.u_range, ranges);
+        gl.uniform3iv(mu.u_range, ranges);
         gl.uniform3fv(mu.u_look, looks);
         gl.uniform1fv(mu.u_spacing, spacing);
         gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);

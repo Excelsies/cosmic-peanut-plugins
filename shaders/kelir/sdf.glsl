@@ -44,6 +44,32 @@ float sdTriangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
   return -sqrt(d.x) * sign(d.y);
 }
 
+// Polygon vertex k of the polygon whose vertices start at record r (four per record). Reads the
+// u_prims table declared by the including shader.
+vec2 polyVertex(int r, int k) {
+  vec4 v = u_prims[2 * (r + k / 4) + (k % 4) / 2];
+  return (k % 2 == 0) ? v.xy : v.zw;
+}
+
+// iq's exact signed distance to a simple polygon of n (<= 32) vertices.
+float sdPolygon(vec2 p, int r, int n) {
+  vec2 vj = polyVertex(r, n - 1);
+  float dd = 1e18;
+  float s = 1.0;
+  for (int k = 0; k < 32; k++) {
+    if (k >= n) break;
+    vec2 vi = polyVertex(r, k);
+    vec2 e = vj - vi;
+    vec2 w = p - vi;
+    vec2 b = w - e * clamp(dot(w, e) / dot(e, e), 0.0, 1.0);
+    dd = min(dd, dot(b, b));
+    bvec3 c = bvec3(p.y >= vi.y, p.y < vj.y, e.x * w.y > e.y * w.x);
+    if (all(c) || all(not(c))) s = -s;
+    vj = vi;
+  }
+  return s * sqrt(dd);
+}
+
 float sdBox(vec2 p, vec2 b) {
   vec2 d = abs(p) - b;
   return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
@@ -66,10 +92,11 @@ float holeDistance(vec2 p, float s) {
 // Shadow coverage (before opacity) of a laced silhouette at distance d (bone units), lattice
 // point p: the body's penumbra (half-width w px at ppu px per bone unit) times one minus the
 // lamp light through the nearest hole, kept out of the border band. A blurred hole of radius R
-// passes 1 - exp(-2 (R / w)^2) at its centre; holes under ~1.5 px are dropped.
-float laceCoverage(float d, vec2 p, float s, float border, float ppu, float w) {
+// passes 1 - exp(-2 (R / w)^2) at its centre; holes under ~1.5 px are dropped. A SOLID nearest
+// primitive (solid = true) is not pierced.
+float laceCoverage(float d, vec2 p, float s, float border, float ppu, float w, bool solid) {
   float body = 1.0 - smoothstep(-w, w, d * ppu);
-  if (body <= 0.0) return 0.0;
+  if (body <= 0.0 || solid) return body;
   float r = HOLE * s * ppu;
   float contrast = (1.0 - exp(-2.0 * r * r / (w * w))) * smoothstep(1.0, 2.0, r);
   float hole = (1.0 - smoothstep(-w, w, holeDistance(p, s) * ppu)) * contrast;

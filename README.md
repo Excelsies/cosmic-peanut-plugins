@@ -18,8 +18,10 @@ flicker. Every eight bars the kayon sweeps across the screen, turning flat as it
 puppets swap sides behind it; in silence they withdraw and the kayon returns to centre stage
 until the next hit. Renderer: `webgl2`.
 
-The figures are generic stylisations in the wayang manner (frontal shoulders, profile heads with
-long noses and swept-back crowns, a kain with a trailing drape), not any particular character.
+The figures are generic stylisations in the wayang manner (a frontal torso on a narrow waist, a
+profile head with the forehead running straight into a long nose and an almond eye cut out of a
+solid face, a tiered crown with a backward-facing ornament, a belt, a kain with a panel between
+the legs and a trailing drape, very long arms), not any particular character.
 
 ### Parameters
 
@@ -36,13 +38,19 @@ long noses and swept-back crowns, a kain with a trailing drape), not any particu
 ### How it works
 
 - **Figures** (`src/kelir/lib/puppets.js`): each silhouette is a table of 2D signed-distance
-  primitives (capsule, uneven capsule, vesica, triangle, disc, box), two vec4 per record, 64
-  records in all: about 26 per puppet, 10 for the kayon. The kayon is evaluated at (|x|, y), so
-  it is mirror-symmetric, and its gate, trunk and branches are subtracted (d = max(d, −dCut)).
-  The same evaluation is ported to JS for the tests.
+  primitives (capsule, uneven capsule, vesica, triangle, disc, box, polygon), two vec4 per record,
+  at most 64 records. The puppets' outlines are three polygons (the laced body, the solid face,
+  the laced crown; up to 32 vertices each, four per record, iq's exact sdPolygon), plus capsules,
+  discs and vesicas for the limbs, rods and ornaments. Both puppets share one figure (42 records)
+  and own only their two hand rods: the table is [A's rods, figure, B's rods, kayon], 56 records.
+  Primitives flagged solid (face, neck, limbs, rods) are never pierced by the lace. Cuts
+  (d = max(d, −dCut)) make the eye, the crown ornament's ring and the two slits around the belt.
+  The kayon is evaluated at (|x|, y), so it is mirror-symmetric, and its gate, trunk and branches
+  are subtracted. The same evaluation is ported to JS for the tests.
 - **Rig** (`lib/rig.js`): six bones per silhouette (body, front upper arm and forearm, back upper
   arm and forearm, head), each a 2D affine transform; the shader reads their stage → bone
-  inverses (18 mat3 from one `Float32Array`). The hand rods are rewritten each frame from the
+  inverses (18 mat3 from one `Float32Array`), each silhouette's records indexing its six from
+  its first bone. The hand rods are rewritten each frame from the
   grips straight down off the bottom of the screen.
 - **Lace**: holes on a hex lattice in each primitive's bone frame (round holes, upward teardrops
   on alternate rows, radius 0.32 of the spacing), kept out of a solid border band 0.012 puppet
@@ -61,7 +69,8 @@ long noses and swept-back crowns, a kain with a trailing drape), not any particu
   120 Hz.
 - **Arms and body**: smoothed centroid (0.25 s) sets the front shoulder to
   −0.3 + 1.6 · clamp(3 · centroid, 0, 1) rad; smoothed midAtt (0.3 s) swings the front elbow
-  with the beat and raises the back shoulder; the beat clock (free at 1 beat/s without a tempo)
+  with the beat and swings the back arm forward from where it hangs behind the body (−0.45 rad,
+  elbow 0.25 rad) by up to 0.6 rad; the beat clock (free at 1 beat/s without a tempo)
   sways the bodies by 0.04 rad and bobs the heads.
 - **Stereo**: the balance (1 s smoothing; exactly 0 for mono or identical channels) shifts the
   pair by up to 0.08 of the width toward the louder side.
@@ -74,8 +83,11 @@ long noses and swept-back crowns, a kain with a trailing drape), not any particu
   · n(t), n a 7 Hz value noise; it moves the shadows by up to 6 px · H/1440 times their distance
   (parallax) and dims the screen by 5% · |f| at most.
 - **GPU**: a mask pass draws one instanced quad per visible silhouette over its bounding box
-  into an R8 target (0.75 resolution, or full resolution when renderScale is 1 at quality
-  'high'), blended with MAX (`shaders/kelir/mask.frag`); the composite
+  (cut off at the bottom edge) into an R8 target (0.75 resolution, or full resolution when
+  renderScale is 1 at quality 'high'), blended with MAX (`shaders/kelir/mask.frag`). Each
+  pixel's distance starts at the penumbra's reach (coverage is 0 beyond it) and a polygon is
+  skipped when its bounding box is no nearer than the distance so far, so most pixels pay for
+  the cheap primitives only; the composite
   (`shaders/kelir/composite.frag`) lights the screen (hotspot, a 3 CSS px weave at 6% contrast,
   the flicker), sharpens the mask with 4 taps when it is below full resolution, and lays the
   shadows over it. No float targets and no extensions. `dispose()` deletes both programs, the

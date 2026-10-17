@@ -18,6 +18,9 @@ import { createMeter } from "./meter.js";
 import { stereoImage } from "./stereo.js";
 
 export const PUPPET_REST = 0.55;
+/** The back arm at rest (quiet mids): shoulder swung back, elbow bent forward, radians. */
+export const BACK_REST = -0.45;
+export const BACK_ELBOW = 0.25;
 export const KAYON_REST = 0.25;
 /** Kayon distance at centre stage in silence (crisp). */
 const KAYON_CENTRE = 0.1;
@@ -200,7 +203,7 @@ export function createStage() {
       const bob = -0.008 * Math.exp(-6 * (beats - Math.floor(beats)));
       const shF = -0.3 + 1.6 * clamp01(centroidS * 3);
       const lift = 0.5 * Math.sin(Math.PI * beats) * clamp01(midAttS - 0.5) * p.reactivity;
-      const shB = 0.2 + 0.6 * clamp01(midAttS - 1);
+      const shB = BACK_REST + 0.6 * clamp01(midAttS - 1);
 
       // Puppets.
       const swapT = ease((now - swapAt) / SWAP_S);
@@ -222,7 +225,7 @@ export function createStage() {
         s.shF = shF;
         s.elF = 0.4 + (i === 0 ? lift : -lift);
         s.shB = shB;
-        s.elB = 0.3;
+        s.elB = BACK_ELBOW;
       }
 
       // Kayon.

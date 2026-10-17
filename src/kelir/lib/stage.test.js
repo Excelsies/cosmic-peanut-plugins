@@ -1,7 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import { resolveParams } from "./kelir-params.js";
-import { KAYON_REST, PUPPET_REST, SILENCE_HOLD, createStage, lungeEnvelope, penumbra } from "./stage.js";
+import { BACK_ELBOW, BACK_REST, KAYON_REST, PUPPET_REST, SILENCE_HOLD, createStage, lungeEnvelope, penumbra } from "./stage.js";
 
 const DEFAULTS = { screen: "lamp", cast: "duet", reactivity: 1, flicker: 0.5, blur: 1, lace: 1, scenes: true };
 /** @param {Record<string, unknown>} [over] @param {boolean} [reduce] */
@@ -284,6 +284,14 @@ describe("stage placement", () => {
     drive(stage, { seconds: 5, at: () => ({ left: loud, right: quiet }) });
     expect(stage.sil[A].x).toBeLessThan(0.3);
     expect(stage.sil[A].x).toBeGreaterThan(0.3 - 0.08);
+  });
+
+  it("hangs the back arm behind the body while the mids are quiet", () => {
+    const stage = createStage();
+    drive(stage, { seconds: 2, at: () => ({ midAtt: 0.5 }) });
+    expect(stage.sil[A].shB).toBeCloseTo(BACK_REST, 6);
+    expect(stage.sil[A].elB).toBeCloseTo(BACK_ELBOW, 6);
+    expect(BACK_REST).toBeLessThan(0);
   });
 
   it("raises the front hand with a brighter melody and the back arm with loud mids", () => {

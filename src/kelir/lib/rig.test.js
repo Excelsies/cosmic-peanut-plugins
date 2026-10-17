@@ -1,7 +1,8 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { FORE, GRIP, MAX_RECORDS, RECORD_FLOATS, ROD_END, SHOULDER_F, UPPER, buildCast, sdfRange } from "./puppets.js";
+import { FORE, GRIP, MAX_RECORDS, RECORD_FLOATS, ROD_END, SHOULDER_F, UPPER, boneBase, buildCast, sdfRange } from "./puppets.js";
 import { createPose, createRig, poseSilhouette, rewriteRods, silhouetteBounds } from "./rig.js";
+import { BACK_ELBOW, BACK_REST } from "./stage.js";
 
 const table = new Float32Array(MAX_RECORDS * RECORD_FLOATS);
 const cast = buildCast(table);
@@ -59,6 +60,18 @@ describe("poseSilhouette", () => {
     expect(ey).toBeCloseTo(SHOULDER_F[1], 6);
   });
 
+  it("rests the back arm behind the body, its forearm and hand clear of the torso and legs", () => {
+    const rig = createRig();
+    const pose = createPose();
+    Object.assign(pose, { s: 1, fx: 1, shB: BACK_REST, elB: BACK_ELBOW });
+    poseSilhouette(rig, 0, pose);
+    for (let k = 0; k <= 20; k++) {
+      const [x, y] = apply(rig.fwd, 4, 0, (-k / 20) * (FORE + 0.08));
+      expect(x).toBeLessThan(-0.1);
+      expect(y).toBeGreaterThan(0.1);
+    }
+  });
+
   it("bobs only the head bone", () => {
     const rig = createRig();
     const pose = createPose();
@@ -95,14 +108,14 @@ describe("silhouetteBounds", () => {
     poseSilhouette(rig, 1, pose);
     rewriteRods(table, cast.rods, rig, 1);
     const box = new Float32Array(4);
-    silhouetteBounds(table, cast.ranges[2], cast.ranges[3], rig, 0.05, box, 0);
-    const q = new Float64Array(2);
+    silhouetteBounds(table, cast.ranges[2], cast.ranges[3], rig, boneBase(1), 0.05, box, 0);
+    const q = new Float64Array(3);
     let inside = 0;
     for (let i = 0; i <= 60; i++) {
       for (let j = 0; j <= 60; j++) {
         const x = -0.5 + (i / 60) * 3;
         const y = -1 + (j / 60) * 2.5;
-        if (sdfRange(table, cast.ranges[2], cast.ranges[3], rig.inv, x, y, q) < 0.05 * 0.7) {
+        if (y >= 0 && sdfRange(table, cast.ranges[2], cast.ranges[3], rig.inv, boneBase(1), x, y, q) < 0.05 * 0.7) {
           inside++;
           expect(x).toBeGreaterThanOrEqual(box[0]);
           expect(y).toBeGreaterThanOrEqual(box[1]);
@@ -112,7 +125,8 @@ describe("silhouetteBounds", () => {
       }
     }
     expect(inside).toBeGreaterThan(20);
-    expect(box[1]).toBeLessThan(0.2 + ROD_END * 0.7 + 0.01); // the rods run off the bottom
+    // The rods run off the bottom; the box stops at the screen's bottom edge (y = 0).
+    expect(box[1]).toBe(0);
   });
 
   it("covers the kayon's mirrored half", () => {
@@ -121,7 +135,7 @@ describe("silhouetteBounds", () => {
     Object.assign(pose, { x: 0.9, y: 0.1, s: 0.6, fx: 1 });
     poseSilhouette(rig, 2, pose);
     const box = new Float32Array(4);
-    silhouetteBounds(table, cast.ranges[4], cast.ranges[5], rig, 0, box, 0);
+    silhouetteBounds(table, cast.ranges[4], cast.ranges[5], rig, boneBase(2), 0, box, 0);
     expect(box[0]).toBeCloseTo(0.9 - 0.27 * 0.6, 2);
     expect(box[2]).toBeCloseTo(0.9 + 0.27 * 0.6, 2);
     expect(box[3]).toBeCloseTo(0.1 + 0.6, 2);

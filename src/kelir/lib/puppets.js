@@ -11,10 +11,21 @@
  *   3 triangle       a, b, and the third point in the next record's (ax, ay)
  *   4 disc           centre a, radius r1
  *   5 box            centre a, half-size (r1, r2), axis-aligned in bone space
+ *   6 polygon        header (cx, cy, hx, hy), (n, -, type, bone): a bounding box and the
+ *                    vertex count (at most MAX_POLY); the n vertices follow, four per record
+ *                    (x0, y0, x1, y1), (x2, y2, x3, y3), filling ceil(n / 4) records. Any
+ *                    simple polygon, concave too (iq's exact sdPolygon); skipped while its
+ *                    bounding box is no nearer than the distance so far
  * The type's flag bits: MIRROR evaluates at (|x|, y) (the kayon), CUT subtracts the primitive
- * (d = max(d, -dCut)); cuts come after every union in a range. `bone` indexes the stage -> bone
- * transforms (6 per silhouette: root/body, front upper arm, front forearm, back upper arm, back
- * forearm, head).
+ * from everything before it in the range (d = max(d, -dCut)), SOLID keeps the lace out where
+ * the primitive is the nearest one (faces, necks, limbs and rods: the hide is perforated, the
+ * face is not). `bone` (0..5) is local to the
+ * silhouette: body, front upper arm, front forearm, back upper arm, back forearm, head; the
+ * silhouette's boneBase (slot * 6) is added to index the stage -> bone transforms.
+ *
+ * Puppets A and B share one figure: the table holds [A's two hand rods, figure, B's two hand
+ * rods, kayon], A's range is the first two blocks and B's the middle two, so the rods (rewritten
+ * every frame from each puppet's pose) are the only per-puppet records.
  *
  * The figures are generic stylisations, not any particular wayang character.
  */
@@ -32,9 +43,13 @@ export const VESICA = 2;
 export const TRIANGLE = 3;
 export const DISC = 4;
 export const BOX = 5;
+export const POLY = 6;
 const TRI_REST = 7; // the second record of a triangle
+/** Most vertices in one polygon. */
+export const MAX_POLY = 32;
 export const MIRROR = 8;
 export const CUT = 16;
+export const SOLID = 32;
 
 /** Solid band (puppet units) inside every outline that the lace never pierces. */
 export const BORDER = 0.012;
@@ -42,13 +57,16 @@ export const BORDER = 0.012;
 export const HOLE = 0.32;
 
 /** Arm rig, puppet units: shoulders on the torso, bone lengths, the hand grip on the forearm. */
-export const SHOULDER_F = [0.07, 0.565];
-export const SHOULDER_B = [-0.05, 0.56];
+export const SHOULDER_F = [0.082, 0.562];
+export const SHOULDER_B = [-0.058, 0.56];
 export const UPPER = 0.17;
 export const FORE = 0.16;
 export const GRIP = FORE + 0.03;
 /** Where the rods end below the base (off the bottom of the screen). */
 export const ROD_END = -0.6;
+
+/** First rig bone of silhouette `slot` (0 = A, 1 = B, 2 = kayon). @param {number} slot */
+export const boneBase = (slot) => slot * BONES_PER;
 
 /**
  * @param {Float32Array} t
@@ -70,6 +88,30 @@ function put(t, i, ax, ay, bx, by, r1, r2, type, bone) {
   return i + 1;
 }
 
+/**
+ * Write a polygon (flat [x0, y0, x1, y1, ...]) at record i; returns the next free record.
+ * @param {Float32Array} t @param {number} i @param {number[]} v @param {number} flags
+ * @param {number} bone
+ */
+export function putPolygon(t, i, v, flags, bone) {
+  const n = v.length >> 1;
+  if (n < 3 || n > MAX_POLY) throw new Error(`puppets: a polygon needs 3..${MAX_POLY} vertices, not ${n}`);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let k = 0; k < n; k++) {
+    x0 = Math.min(x0, v[2 * k]);
+    x1 = Math.max(x1, v[2 * k]);
+    y0 = Math.min(y0, v[2 * k + 1]);
+    y1 = Math.max(y1, v[2 * k + 1]);
+  }
+  const rec = i + 1 + Math.ceil(n / 4);
+  if (rec > MAX_RECORDS) throw new Error(`puppets: more than ${MAX_RECORDS} records`);
+  const pad = 1e-5;
+  put(t, i, (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2 + pad, (y1 - y0) / 2 + pad, n, 0, POLY | flags, bone);
+  const o = (i + 1) * RECORD_FLOATS;
+  for (let k = 0; k < Math.ceil(n / 4) * 8; k++) t[o + k] = k < 2 * n ? v[k] : 0;
+  return rec;
+}
+
 /** @param {Float32Array} t @param {number} i @param {number[]} p @param {number} bone */
 function tri(t, i, p, bone) {
   i = put(t, i, p[0], p[1], p[2], p[3], 0, 0, TRIANGLE, bone);
@@ -77,49 +119,90 @@ function tri(t, i, p, bone) {
 }
 
 /**
- * One rod puppet: a profile figure facing +x on bones b0..b0+5. Wayang conventions: a frontal,
- * broad-shouldered torso on a narrow waist, a small profile head with a long pointed nose on a
- * long forward-leaning neck, a tall crown swept back into a curl, a kain flaring into a pointed
- * drape behind the striding legs, and very long thin arms with pointed hands.
- * @param {Float32Array} t @param {number} i first record @param {number} b0 first bone
- * @param {Int32Array} rods where to note the two hand-rod record indices
- * @param {number} r0 index into rods
+ * The figure's outlines (puppet units, facing +x), drawn as polygons. BODY: square shoulders, a
+ * chest swelling forward and tapering to the waist, the belt, a kain flaring to its hem with a
+ * pointed panel hanging between the legs and a drape sweeping back to a point behind them.
  */
-function puppet(t, i, b0, rods, r0) {
-  const body = b0;
-  const head = b0 + 5;
-  // Feet in profile (long, pointed forward) and striding legs.
-  i = put(t, i, 0.035, 0.012, 0.16, 0.004, 0.016, 0.003, UNEVEN, body);
-  i = put(t, i, -0.13, 0.012, -0.02, 0.004, 0.015, 0.003, UNEVEN, body);
-  i = put(t, i, 0.06, 0.02, 0.035, 0.21, 0.02, 0.032, UNEVEN, body);
-  i = put(t, i, -0.1, 0.02, -0.035, 0.21, 0.018, 0.03, UNEVEN, body);
-  // Kain: hips and thighs, and a pointed drape trailing behind.
-  i = put(t, i, 0, 0.19, 0.005, 0.38, 0.07, 0.045, UNEVEN, body);
-  i = tri(t, i, [-0.045, 0.37, 0.05, 0.3, -0.16, 0.07], body);
-  // Narrow waist, chest, broad frontal shoulders, long forward-leaning neck.
-  i = put(t, i, 0, 0.37, 0.01, 0.52, 0.038, 0.055, UNEVEN, body);
-  i = put(t, i, SHOULDER_B[0], SHOULDER_B[1], SHOULDER_F[0], SHOULDER_F[1], 0.024, 0, CAPSULE, body);
-  i = put(t, i, 0.012, 0.55, 0.055, 0.675, 0.017, 0, CAPSULE, body);
-  // Head in profile: the back of the skull, the face sloping from forehead to a long pointed
-  // nose; a tall crown tapering into a point swept back, with a roundel at its back.
-  i = put(t, i, 0.055, 0.715, 0, 0, 0.034, 0, DISC, head);
-  i = tri(t, i, [0.04, 0.765, 0.175, 0.685, 0.05, 0.665], head);
-  i = put(t, i, 0.05, 0.75, 0.025, 0.865, 0.04, 0.03, UNEVEN, head);
-  i = tri(t, i, [-0.008, 0.855, 0.052, 0.87, -0.035, 0.985], head);
-  i = put(t, i, 0.004, 0.8, 0, 0, 0.03, 0, DISC, head);
-  // Arms: upper arm and forearm on their own bones, hanging along -y at rest; pointed hands.
-  for (const [upper, fore] of [[b0 + 1, b0 + 2], [b0 + 3, b0 + 4]]) {
-    i = put(t, i, 0, 0, 0, -UPPER, 0.013, 0.009, UNEVEN, upper);
-    i = put(t, i, 0, 0, 0, -FORE, 0.01, 0.008, UNEVEN, fore);
-    i = put(t, i, 0, -FORE, 0.012, -FORE - 0.07, 0.011, 0.002, UNEVEN, fore);
+const BODY = [
+  0.06, 0.584, 0.09, 0.578, 0.098, 0.562, 0.08, 0.54, 0.074, 0.505, 0.064, 0.462, 0.046, 0.42,
+  0.054, 0.402, 0.054, 0.384, 0.074, 0.32, 0.088, 0.25, 0.094, 0.196, 0.046, 0.2, 0.038, 0.085,
+  0.022, 0.2, -0.062, 0.2, -0.1, 0.15, -0.135, 0.1, -0.175, 0.045, -0.15, 0.12, -0.122, 0.205,
+  -0.094, 0.29, -0.066, 0.36, -0.05, 0.384, -0.05, 0.402, -0.036, 0.42, -0.05, 0.475, -0.064, 0.53,
+  -0.072, 0.562, -0.062, 0.58, 0, 0.586,
+];
+/** FACE: the nape and jaw, chin, lips below a notch, the long nose running straight up into the forehead, the skull. */
+const FACE = [
+  0.02, 0.69, 0.05, 0.674, 0.08, 0.664, 0.098, 0.668, 0.104, 0.677, 0.097, 0.682, 0.11, 0.689,
+  0.104, 0.696, 0.176, 0.689, 0.13, 0.722, 0.09, 0.752, 0.08, 0.77, 0.03, 0.778, 0.004, 0.752,
+  0.004, 0.716, 0.012, 0.698,
+];
+/**
+ * CROWN (makutha): a band over the forehead, three tiers stepping back up the front to a pointed
+ * top, and a backward-facing ornament (garuda mungkur) hooking out behind, with a feather below.
+ */
+const CROWN = [
+  0.086, 0.768, 0.092, 0.786, 0.08, 0.792, 0.084, 0.818, 0.07, 0.822, 0.073, 0.85, 0.058, 0.855,
+  0.06, 0.884, 0.044, 0.89, 0.038, 0.92, 0.025, 0.944, 0.008, 0.962, -0.006, 0.948, -0.014, 0.922,
+  -0.018, 0.9, -0.042, 0.904, -0.07, 0.916, -0.094, 0.904, -0.082, 0.892, -0.064, 0.892, -0.046,
+  0.882, -0.034, 0.866, -0.052, 0.85, -0.078, 0.84, -0.046, 0.826, -0.022, 0.81, -0.012, 0.78,
+  0.02, 0.772,
+];
+/** Centre of the ring at the end of the garuda's hook (puppet units). */
+export const CURL = [-0.092, 0.9];
+
+/**
+ * The rod puppets' shared figure on local bones 0..5, in the wayang manner: a frontal torso, a
+ * small profile head with the forehead running straight into a long pointed nose and an almond
+ * eye cut out of a solid face, a tiered crown, a belt, a kain over striding legs, and
+ * very long thin arms with armlets and leaf-shaped hands.
+ * @param {Float32Array} t @param {number} i first record
+ */
+function figure(t, i) {
+  const S = SOLID;
+  const body = 0;
+  const head = 5;
+  // Feet in profile (long, pointed forward) and slender striding legs.
+  i = put(t, i, 0.035, 0.012, 0.16, 0.004, 0.016, 0.003, UNEVEN | S, body);
+  i = put(t, i, -0.13, 0.012, -0.02, 0.004, 0.015, 0.003, UNEVEN | S, body);
+  i = put(t, i, 0.06, 0.02, 0.045, 0.2, 0.013, 0.02, UNEVEN | S, body);
+  i = put(t, i, -0.1, 0.02, -0.045, 0.2, 0.012, 0.019, UNEVEN | S, body);
+  // Long forward-leaning neck.
+  i = put(t, i, 0.016, 0.57, 0.036, 0.685, 0.014, 0, CAPSULE | S, body);
+  // Arms: upper arm (with an armlet) and forearm on their own bones, hanging along -y at rest;
+  // leaf-shaped hands.
+  for (const [upper, fore] of [[1, 2], [3, 4]]) {
+    i = put(t, i, 0, 0, 0, -UPPER, 0.014, 0.009, UNEVEN | S, upper);
+    i = put(t, i, 0, -0.045, 0, 0, 0.016, 0, DISC | S, upper);
+    i = put(t, i, 0, 0, 0, -FORE, 0.01, 0.007, UNEVEN | S, fore);
+    i = put(t, i, 0.006, -FORE - 0.038, 0.158, -0.987, 0.011, 0.042, VESICA | S, fore);
   }
-  // Main rod, then the two hand rods (endpoints rewritten every frame by the rig).
-  i = put(t, i, 0, 0.1, 0, ROD_END, 0.004, 0, CAPSULE, body);
+  // The main rod.
+  i = put(t, i, 0, 0.1, 0, ROD_END, 0.004, 0, CAPSULE | S, body);
+  // The polygons last, so the cheap primitives above have already brought the distance down
+  // and most pixels skip them by their boxes: the laced body, the solid face, the laced crown;
+  // then the crown's ring and the ear ornament (sumping).
+  i = putPolygon(t, i, BODY, 0, body);
+  i = putPolygon(t, i, FACE, S, head);
+  i = putPolygon(t, i, CROWN, 0, head);
+  i = put(t, i, CURL[0], CURL[1], 0, 0, 0.014, 0, DISC, head);
+  i = put(t, i, -0.012, 0.736, -0.97, 0.243, 0.013, 0.038, VESICA, head);
+  // Cuts (they subtract from everything above): the eye, the ring's opening, two slits that set
+  // the belt off between the torso and the kain.
+  i = put(t, i, 0.098, 0.734, 0.8, -0.6, 0.0045, 0.015, VESICA | CUT, head);
+  i = put(t, i, CURL[0], CURL[1], 0, 0, 0.0055, 0, DISC | CUT, head);
+  i = put(t, i, -0.06, 0.406, 0.07, 0.406, 0.0028, 0, CAPSULE | CUT, body);
+  return put(t, i, -0.07, 0.38, 0.07, 0.38, 0.0028, 0, CAPSULE | CUT, body);
+}
+
+/**
+ * One puppet's two hand rods, on its body bone (endpoints rewritten every frame by the rig).
+ * @param {Float32Array} t @param {number} i @param {Int32Array} rods @param {number} r0
+ */
+function handRods(t, i, rods, r0) {
   rods[r0] = i;
-  i = put(t, i, 0, 0, 0, ROD_END, 0.0035, 0, CAPSULE, body);
+  i = put(t, i, 0, 0, 0, ROD_END, 0.0035, 0, CAPSULE | SOLID, 0);
   rods[r0 + 1] = i;
-  i = put(t, i, 0, 0, 0, ROD_END, 0.0035, 0, CAPSULE, body);
-  return i;
+  return put(t, i, 0, 0, 0, ROD_END, 0.0035, 0, CAPSULE | SOLID, 0);
 }
 
 /**
@@ -128,7 +211,7 @@ function puppet(t, i, b0, rods, r0) {
  */
 function kayon(/** @type {Float32Array} */ t, /** @type {number} */ i) {
   const m = MIRROR;
-  const b = KAYON_BONE;
+  const b = 0;
   i = put(t, i, 0, 0.27, 0, 0.55, 0.27, 0.16, UNEVEN | m, b);
   i = put(t, i, 0, 0.6, 0, 1, 0.19, 0.4, VESICA | m, b);
   i = put(t, i, 0, 0.04, 0, 0, 0.22, 0.04, BOX | m, b);
@@ -151,12 +234,13 @@ function kayon(/** @type {Float32Array} */ t, /** @type {number} */ i) {
 export function buildCast(table) {
   const ranges = new Int32Array(6);
   const rods = new Int32Array(4);
-  let i = 0;
-  for (let s = 0; s < 2; s++) {
-    ranges[s * 2] = i;
-    i = puppet(table, i, s * BONES_PER, rods, s * 2);
-    ranges[s * 2 + 1] = i - ranges[s * 2];
-  }
+  let i = handRods(table, 0, rods, 0);
+  i = figure(table, i);
+  ranges[0] = 0;
+  ranges[1] = i;
+  ranges[2] = 2;
+  i = handRods(table, i, rods, 2);
+  ranges[3] = i - 2;
   ranges[4] = i;
   i = kayon(table, i);
   ranges[5] = i - ranges[4];
@@ -226,6 +310,38 @@ export function sdTriangle(/** @type {number} */ px, /** @type {number} */ py, /
   return -Math.sqrt(dd) * Math.sign(sg);
 }
 
+/**
+ * Polygon of n vertices stored from record `rec` on, four per record (iq's sdPolygon).
+ * @param {number} px @param {number} py @param {Float32Array} t @param {number} rec
+ * @param {number} n
+ */
+export function sdPolygon(px, py, t, rec, n) {
+  const o = rec * RECORD_FLOATS;
+  let jx = t[o + 2 * (n - 1)];
+  let jy = t[o + 2 * (n - 1) + 1];
+  let dd = 1e18;
+  let s = 1;
+  for (let k = 0; k < n; k++) {
+    const ix = t[o + 2 * k];
+    const iy = t[o + 2 * k + 1];
+    const ex = jx - ix;
+    const ey = jy - iy;
+    const wx = px - ix;
+    const wy = py - iy;
+    const h = clamp((wx * ex + wy * ey) / (ex * ex + ey * ey || 1), 0, 1);
+    const bx = wx - ex * h;
+    const by = wy - ey * h;
+    dd = Math.min(dd, bx * bx + by * by);
+    const c0 = py >= iy;
+    const c1 = py < jy;
+    const c2 = ex * wy > ey * wx;
+    if ((c0 && c1 && c2) || (!c0 && !c1 && !c2)) s = -s;
+    jx = ix;
+    jy = iy;
+  }
+  return s * Math.sqrt(dd);
+}
+
 /** Axis-aligned box centred at c with half-size (hx, hy). */
 export function sdBox(/** @type {number} */ px, /** @type {number} */ py, /** @type {number} */ cx, /** @type {number} */ cy, /** @type {number} */ hx, /** @type {number} */ hy) {
   const dx = Math.abs(px - cx) - hx;
@@ -235,36 +351,47 @@ export function sdBox(/** @type {number} */ px, /** @type {number} */ py, /** @t
 
 /**
  * Signed distance (bone units) from stage point (x, y) to the silhouette in records
- * [start, start + count), with the bones' stage -> bone transforms `inv` (column-major mat3 each).
- * Writes the bone-local point of the nearest union primitive into q (the lace's lattice frame).
+ * [start, start + count), with the bones' stage -> bone transforms `inv` (column-major mat3 each)
+ * from bone `base` on. Writes the bone-local point of the nearest union primitive into q[0], q[1]
+ * (the lace's lattice frame) and 1 into q[2] if that primitive is SOLID, else 0. The distance
+ * starts at `cutoff`: nothing farther matters (the mask pass passes the penumbra's reach, beyond
+ * which coverage is 0), so a polygon whose box lies beyond it is skipped, and with nothing nearer
+ * the result is the cutoff.
  * @param {Float32Array} t @param {number} start @param {number} count @param {Float32Array} inv
- * @param {number} x @param {number} y @param {Float64Array | Float32Array} q
+ * @param {number} base @param {number} x @param {number} y @param {Float64Array | Float32Array} q
+ * @param {number} [cutoff]
  */
-export function sdfRange(t, start, count, inv, x, y, q) {
-  let d = 1e9;
+export function sdfRange(t, start, count, inv, base, x, y, q, cutoff = 1e9) {
+  let d = cutoff;
   for (let i = start; i < start + count; i++) {
     const o = i * RECORD_FLOATS;
     const type = t[o + 6] | 0;
-    const m = (t[o + 7] | 0) * 9;
+    const m = (base + (t[o + 7] | 0)) * 9;
     let px = inv[m] * x + inv[m + 3] * y + inv[m + 6];
     const py = inv[m + 1] * x + inv[m + 4] * y + inv[m + 7];
     if (type & MIRROR) px = Math.abs(px);
-    const base = type & 7;
+    const kind = type & 7;
     let ds;
-    if (base === CAPSULE) ds = sdSegment(px, py, t[o], t[o + 1], t[o + 2], t[o + 3]) - t[o + 4];
-    else if (base === UNEVEN) ds = sdUneven(px, py, t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4], t[o + 5]);
-    else if (base === VESICA) ds = sdVesica(px, py, t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4], t[o + 5]);
-    else if (base === TRIANGLE) {
+    if (kind === CAPSULE) ds = sdSegment(px, py, t[o], t[o + 1], t[o + 2], t[o + 3]) - t[o + 4];
+    else if (kind === UNEVEN) ds = sdUneven(px, py, t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4], t[o + 5]);
+    else if (kind === VESICA) ds = sdVesica(px, py, t[o], t[o + 1], t[o + 2], t[o + 3], t[o + 4], t[o + 5]);
+    else if (kind === TRIANGLE) {
       const n = o + RECORD_FLOATS;
       ds = sdTriangle(px, py, t[o], t[o + 1], t[o + 2], t[o + 3], t[n], t[n + 1]);
       i++;
-    } else if (base === DISC) ds = Math.hypot(px - t[o], py - t[o + 1]) - t[o + 4];
+    } else if (kind === POLY) {
+      const n = t[o + 4] | 0;
+      const far = !(type & CUT) && sdBox(px, py, t[o], t[o + 1], t[o + 2], t[o + 3]) >= d;
+      ds = far ? 1e9 : sdPolygon(px, py, t, i + 1, n);
+      i += Math.ceil(n / 4);
+    } else if (kind === DISC) ds = Math.hypot(px - t[o], py - t[o + 1]) - t[o + 4];
     else ds = sdBox(px, py, t[o], t[o + 1], t[o + 4], t[o + 5]);
     if (type & CUT) d = Math.max(d, -ds);
     else if (ds < d) {
       d = ds;
       q[0] = px;
       q[1] = py;
+      q[2] = type & SOLID ? 1 : 0;
     }
   }
   return d;
@@ -301,10 +428,11 @@ function smoothstep(a, b, x) {
  * @param {number} d silhouette distance, bone units @param {number} x @param {number} y
  * lattice-frame point @param {number} s spacing @param {number} border band, bone units
  * @param {number} ppu mask px per bone unit @param {number} w penumbra half-width, px
+ * @param {number} solid 1 if the nearest primitive is SOLID (no holes), else 0
  */
-export function laceCoverage(d, x, y, s, border, ppu, w) {
+export function laceCoverage(d, x, y, s, border, ppu, w, solid) {
   const body = 1 - smoothstep(-w, w, d * ppu);
-  if (body <= 0) return 0;
+  if (body <= 0 || solid > 0.5) return body;
   const r = HOLE * s * ppu;
   const contrast = (1 - Math.exp((-2 * r * r) / (w * w))) * smoothstep(1, 2, r);
   const hole = (1 - smoothstep(-w, w, holeDistance(x, y, s) * ppu)) * contrast;
