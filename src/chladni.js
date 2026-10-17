@@ -266,6 +266,7 @@ export default async function create(ctx) {
       gl.uniform3fv(cu.u_pal, palette);
       look[2] = hp.haze;
       gl.uniform4fv(cu.u_look, look);
+      gl.uniform1f(cu.u_dustMass, dep[0] / (4 * dep[1])); // airborne points are 2×2 texels
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindVertexArray(null);
     },

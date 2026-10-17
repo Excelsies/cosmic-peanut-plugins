@@ -12,12 +12,13 @@ uniform vec2 u_texel;     // 1 / density size
 uniform vec2 u_res;       // canvas size (px)
 uniform vec3 u_pal[4];    // plate bottom, plate top, sand, sand on no backdrop
 uniform vec4 u_look;      // brushing, sheen, haze envelope (flash-limited), backdrop none (0/1)
+uniform float u_dustMass; // airborne splat -> grounded splat, per grain (W_GROUND / (4 W_AIR) in chladni.js)
 
 const vec3 LIGHT = vec3(-0.6, 0.6, 0.55);
-// How much the haze lifts the dust with backdrop none (0.35 on the plate). Over black the dust is
-// added light, not a veil over a lit plate: at 0.35 a hop lifted the mean luma of a slate frame by
-// up to 7 levels (46%) in one frame; at 0.2 it is at most about 5.
-const float NONE_HAZE = 0.2;
+// Backdrop none: the dust's light per grain, as a share of the sand colour, and how much the haze
+// lifts it (the haze stays the one deliberate brightness change, flash-limited in sand.js).
+const float DUST_LIGHT = 0.85;
+const float NONE_HAZE = 0.3;
 
 uint pcg(uint v) {
   uint state = v * 747796405u + 2891336453u;
@@ -62,7 +63,8 @@ void main() {
   vec4 n = texture(u_den, uv + vec2(0.0, u_texel.y));
   vec4 s = texture(u_den, uv - vec2(0.0, u_texel.y));
 
-  float h = cover(c.r * 0.6 + (e.r + w.r + n.r + s.r) * 0.1);
+  float hr = c.r * 0.6 + (e.r + w.r + n.r + s.r) * 0.1;
+  float h = cover(hr);
   vec2 slope = vec2(cover(e.r) - cover(w.r), cover(n.r) - cover(s.r));
   vec3 nrm = normalize(vec3(-slope * 1.6, 1.0));
   vec3 l = normalize(LIGHT);
@@ -76,10 +78,13 @@ void main() {
 
   if (u_look.w > 0.5) {
     // No plate: premultiplied sand over whatever is behind the window (matte, normal alpha).
+    // The dust covers what the same grains covered on the ground, through the same saturation
+    // (grounded density plus the airborne splat converted to grounded mass), so a hop moves light
+    // around instead of adding it: as bright on a fine figure as on a coarse one.
     vec3 sand = u_pal[3];
     vec3 lit = min(sand * shade + clamp(rim, 0.0, 1.0) * 0.35, vec3(1.0));
-    float d = air * (0.65 + NONE_HAZE * u_look.z) * 0.8 * (1.0 - h);
-    o = vec4(lit * h + sand * 0.85 * d, h + d);
+    float d = min((cover(hr + g * u_dustMass) - h) * (1.0 + NONE_HAZE * u_look.z), 1.0 - h);
+    o = vec4(lit * h + sand * DUST_LIGHT * d, h + d);
     return;
   }
 
