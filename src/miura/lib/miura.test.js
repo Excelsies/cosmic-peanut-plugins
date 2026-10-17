@@ -10,6 +10,7 @@ import {
   foldV,
   LAYOUT_T_MAX,
   layoutT,
+  MAX_COLS,
   rowsFor,
   TILT,
   vertexCount,
@@ -125,8 +126,9 @@ describe("Miura-ori layout (Schenk and Guest)", () => {
     expect(Math.max(...idx)).toBe(vertexCount(COLS, ROWS) - 1);
   });
 
-  it("picks the row count from the pleat preset", () => {
-    expect([rowsFor("classic"), rowsFor("fine"), rowsFor("bold")]).toEqual([20, 30, 12]);
+  it("picks the rows across the window at rest from the pleat preset", () => {
+    expect([rowsFor("classic"), rowsFor("fine"), rowsFor("bold")]).toEqual([16, 24, 10]);
+    expect(rowsFor("rings")).toBe(16);
   });
 });
 
@@ -148,12 +150,14 @@ describe("fitSheet", () => {
     return [s * sx * T * aspect, y];
   }
 
-  for (const [name, aspect] of [["16:9", 16 / 9], ["4:3", 4 / 3], ["21:9", 21 / 9], ["9:16", 9 / 16], ["1:1", 1]]) {
+  /** @type {[string, number][]} */
+  const aspects = [["16:9", 16 / 9], ["4:3", 4 / 3], ["21:9", 21 / 9], ["9:16", 9 / 16], ["1:1", 1]];
+  for (const [name, aspect] of aspects) {
     for (const pleat of ["classic", "fine", "bold"]) {
       it(`overfills the ${name} window with margin at t0 = ${LAYOUT_T_MAX} (${pleat})`, () => {
-        const rows = rowsFor(pleat);
-        const fit = fitSheet(aspect, rows, "fill", {});
-        expect(fit.cols).toBeLessThanOrEqual(80);
+        const fit = fitSheet(aspect, rowsFor(pleat), "fill", {});
+        const rows = fit.rows;
+        expect(fit.cols).toBeLessThanOrEqual(MAX_COLS);
         const S = foldS(LAYOUT_T_MAX), L = foldL(LAYOUT_T_MAX), V = foldV(LAYOUT_T_MAX);
         // The fully covered rectangle (the zig-zag rows leave a V-high fringe at both ends).
         const hw = (fit.k * fit.cols * S) / 2;
@@ -175,15 +179,21 @@ describe("fitSheet", () => {
     }
   }
 
-  it("gives about 36 facet columns at 16:9 with the classic pleat", () => {
-    const fit = fitSheet(16 / 9, 20, "fill", {});
-    expect(fit.cols).toBeGreaterThanOrEqual(32);
-    expect(fit.cols).toBeLessThanOrEqual(42);
+  it("shows about 36 facet columns and 16 rows at rest at 16:9 with the classic pleat", () => {
+    const fit = fitSheet(16 / 9, rowsFor("classic"), "fill", {});
+    const visibleCols = fit.visW / (fit.k * foldS(0.35));
+    expect(visibleCols).toBeGreaterThanOrEqual(32);
+    expect(visibleCols).toBeLessThanOrEqual(42);
+    expect(fit.visH / (fit.k * foldL(0.35))).toBeCloseTo(16, 6);
+    // The whole sheet is larger: it must still cover the window when fully folded.
+    expect(fit.rows).toBeGreaterThan(16);
+    expect(fit.cols).toBeGreaterThan(visibleCols);
   });
 
   it("floats the sheet at 72% of the window width at t0 = 0.35", () => {
     const aspect = 16 / 9;
-    const fit = fitSheet(aspect, 20, "float", {});
+    const fit = fitSheet(aspect, 16, "float", {});
+    expect(fit.rows).toBe(16);
     const hx = 5 * T * aspect;
     expect(fit.k * fit.cols * foldS(0.35)).toBeCloseTo(0.72 * 2 * hx, 5);
     expect(fit.yc).toBe(0);

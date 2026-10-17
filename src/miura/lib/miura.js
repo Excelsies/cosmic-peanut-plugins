@@ -29,9 +29,9 @@ export const LAYOUT_T_MAX = 1.1;
 /** Per-vertex fold angles (waves, swell, rustle) are clamped to [0, LOCAL_T_MAX]. */
 export const LOCAL_T_MAX = 1.45;
 /** Most facet columns the sheet may have. */
-export const MAX_COLS = 80;
-/** Rest fold for the floating sheet's size. */
-const FLOAT_T = 0.35;
+export const MAX_COLS = 160;
+/** Rest fold (the default fold with no bass): sets the facet size. */
+const REST_T = 0.35;
 /** Coverage margin: 4% beyond the window on every side, after the relief. */
 const MARGIN = 1.08;
 /** The default three camera: fov 60 at z = 5. */
@@ -59,10 +59,11 @@ export const foldV = (t) => {
 /** @param {number} t0 global fold @returns {number} the fold the in-plane layout uses */
 export const layoutT = (t0) => Math.min(LAYOUT_T_MAX, Math.max(LAYOUT_T_MIN, t0));
 
+/** Facet rows across the window at rest, per 'pleat' preset (classic gives ~36 columns at 16:9). */
 /** @type {Record<string, number>} */
-const ROWS = { classic: 20, fine: 30, bold: 12 };
+const ROWS = { classic: 16, fine: 24, bold: 10 };
 
-/** Facet rows for a 'pleat' preset (unknown presets get classic). @param {string} pleat */
+/** Facet rows across the window at rest for a 'pleat' preset (unknown: classic). @param {string} pleat */
 export const rowsFor = (pleat) => ROWS[pleat] ?? ROWS.classic;
 
 /** @param {number} cols @param {number} rows */
@@ -167,7 +168,8 @@ const hitTmp = { y: 0, hw: 0 };
 
 /**
  * @typedef {object} SheetFit
- * @property {number} cols facet columns
+ * @property {number} cols facet columns of the whole sheet
+ * @property {number} rows facet rows of the whole sheet
  * @property {number} k scale applied to the unit sheet
  * @property {number} yc mesh-space y of the sheet's centre
  * @property {number} visW width of the visible (or floating) sheet, mesh units
@@ -176,64 +178,58 @@ const hitTmp = { y: 0, hw: 0 };
  */
 
 /**
- * Size the sheet for the window. 'fill': at the most folded layout (t0 = 1.1) the fully covered
- * rectangle overfills the view of the tilted sheet, relief included, by 4% on every side (the
- * view of a tilted plane is a trapezoid reaching further up than down, so the sheet is offset by
- * `yc`); rows are fixed by the pleat, so k comes from the height and cols from the width.
- * 'float': the sheet spans 72% of the window width at t0 = 0.35, roughly window-shaped.
+ * Size the sheet for the window.
+ * 'fill': k makes `visibleRows` facet rows span the window's height at rest (t0 = 0.35); the sheet
+ * then gets enough rows and columns that, at the most folded layout (t0 = 1.1, where it has
+ * contracted most), its fully covered rectangle still overfills the view of the tilted sheet,
+ * relief included, by 4% on every side. The view of a tilted plane is a trapezoid reaching
+ * further up than down, so the sheet is centred at `yc`.
+ * 'float': a sheet of `visibleRows` rows spanning 72% of the window width at rest, roughly
+ * window-shaped.
  * @template {object} T
  * @param {number} aspect width / height
- * @param {number} rows
+ * @param {number} visibleRows
  * @param {string} mode 'fill' | 'float'
  * @param {T} out
  * @returns {T & SheetFit}
  */
-export function fitSheet(aspect, rows, mode, out) {
+export function fitSheet(aspect, visibleRows, mode, out) {
   const o = /** @type {T & SheetFit} */ (out);
+  const S0 = foldS(REST_T);
+  const L0 = foldL(REST_T);
   if (mode === "float") {
-    const S = foldS(FLOAT_T);
-    const L = foldL(FLOAT_T);
     const hx = CAM_Z * TAN_HALF_FOV * aspect;
-    o.cols = Math.min(MAX_COLS, Math.max(4, Math.round((rows * L * aspect) / S)));
-    o.k = (0.72 * 2 * hx) / (o.cols * S);
+    o.rows = visibleRows;
+    o.cols = Math.min(MAX_COLS, Math.max(4, Math.round((visibleRows * L0 * aspect) / S0)));
+    o.k = (0.72 * 2 * hx) / (o.cols * S0);
     o.yc = 0;
     o.visW = 0.72 * 2 * hx;
-    o.visH = o.k * rows * L;
+    o.visH = o.k * visibleRows * L0;
     o.ybot = -o.visH / 2;
     return o;
   }
-  const S = foldS(LAYOUT_T_MAX);
-  const L = foldL(LAYOUT_T_MAX);
-  const V = foldV(LAYOUT_T_MAX);
-  const covered = rows * L - V;
-  const reliefT = foldH(LOCAL_T_MAX);
-  let relief = 0;
-  let top = 0;
-  let bot = 0;
-  let hw = 0;
-  for (let pass = 0; pass < 4; pass++) {
-    top = -Infinity;
-    bot = Infinity;
-    hw = 0;
-    for (let s = -1; s <= 1; s += 2) {
-      const z = s * relief;
-      viewHit(1, z, aspect, hitTmp);
-      top = Math.max(top, hitTmp.y);
-      hw = Math.max(hw, hitTmp.hw);
-      viewHit(-1, z, aspect, hitTmp);
-      bot = Math.min(bot, hitTmp.y);
-      hw = Math.max(hw, hitTmp.hw);
-    }
-    o.k = (MARGIN * (top - bot)) / covered;
-    relief = o.k * reliefT;
-  }
-  o.yc = (top + bot) / 2;
-  o.cols = Math.min(MAX_COLS, Math.ceil((MARGIN * 2 * hw) / (o.k * S)));
   viewHit(1, 0, aspect, hitTmp);
   const top0 = hitTmp.y;
   o.visW = 2 * hitTmp.hw;
   viewHit(-1, 0, aspect, hitTmp);
   o.ybot = hitTmp.y;
   o.visH = top0 - hitTmp.y;
+  o.k = o.visH / (visibleRows * L0);
+  const relief = o.k * foldH(LOCAL_T_MAX);
+  let top = -Infinity;
+  let bot = Infinity;
+  let hw = 0;
+  for (let s = -1; s <= 1; s += 2) {
+    viewHit(1, s * relief, aspect, hitTmp);
+    top = Math.max(top, hitTmp.y);
+    hw = Math.max(hw, hitTmp.hw);
+    viewHit(-1, s * relief, aspect, hitTmp);
+    bot = Math.min(bot, hitTmp.y);
+    hw = Math.max(hw, hitTmp.hw);
+  }
+  o.yc = (top + bot) / 2;
+  // Fully covered height at t = 1.1 is rows L - V (the zig-zag leaves a V-high fringe).
+  o.rows = Math.ceil(((MARGIN * (top - bot)) / o.k + foldV(LAYOUT_T_MAX)) / foldL(LAYOUT_T_MAX));
+  o.cols = Math.min(MAX_COLS, Math.ceil((MARGIN * 2 * hw) / (o.k * foldS(LAYOUT_T_MAX))));
   return o;
 }

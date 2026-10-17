@@ -1,4 +1,5 @@
 // @ts-check
+// @ts-expect-error -- a Node builtin (tests run in Node); the web tsconfig has no @types/node.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
