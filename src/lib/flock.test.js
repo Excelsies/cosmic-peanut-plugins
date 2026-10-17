@@ -56,20 +56,26 @@ describe("flock", () => {
     c.cruise = 0.9;
     let maxSpeed = 0;
     let minSpeed = Infinity;
+    let maxX = 0;
+    let maxY = 0;
+    let maxZ = 0;
     for (let s = 0; s < 600; s++) {
       // A wandering attractor that pushes toward the edges.
       c.ax = Math.sin(s * 0.02) * HX * 0.62;
       c.ay = Math.cos(s * 0.013) * HY * 0.5;
       stepFlock(f, c);
       for (let i = 0; i < f.n; i++) {
-        expect(Math.abs(f.px[i])).toBeLessThan(HX);
-        expect(Math.abs(f.py[i])).toBeLessThan(HY);
-        expect(Math.abs(f.pz[i])).toBeLessThan(Z_HALF);
+        maxX = Math.max(maxX, Math.abs(f.px[i]));
+        maxY = Math.max(maxY, Math.abs(f.py[i]));
+        maxZ = Math.max(maxZ, Math.abs(f.pz[i]));
         const sp = Math.hypot(f.vx[i], f.vy[i], f.vz[i]);
         maxSpeed = Math.max(maxSpeed, sp);
         minSpeed = Math.min(minSpeed, sp);
       }
     }
+    expect(maxX).toBeLessThan(HX);
+    expect(maxY).toBeLessThan(HY);
+    expect(maxZ).toBeLessThan(Z_HALF);
     expect(maxSpeed).toBeLessThanOrEqual(1.6 * 0.9 * 1.0001);
     expect(minSpeed).toBeGreaterThanOrEqual(0.5 * 0.9 * 0.9999);
   });
