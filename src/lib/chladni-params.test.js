@@ -7,7 +7,7 @@ const defaults = { palette: "brass", backdrop: "plate", grains: "64k", complexit
 describe("resolveParams", () => {
   it("passes defaults through", () => {
     const r = resolveParams(defaults, "high", false, createResolved());
-    expect(r).toEqual({ palette: 0, backdrop: 0, grains: 65536, complexity: 1, reactivity: 1, hop: 1, bassTilt: true, reduceMotion: false });
+    expect(r).toEqual({ palette: 0, backdrop: 0, grains: 65536, complexity: 1, reactivity: 1, hop: 1, bassTilt: true, pulse: 1, reduceMotion: false });
   });
 
   it("falls back to defaults for the harness flip-test values", () => {
@@ -40,9 +40,10 @@ describe("resolveParams", () => {
   it("calms the plate under reduce motion only while Reactivity is at its default", () => {
     expect(DEFAULT_REACTIVITY).toBe(1);
     const r = resolveParams(defaults, "high", true, createResolved());
-    expect([r.reactivity, r.hop, r.bassTilt, r.reduceMotion]).toEqual([0.5, 0.5, false, true]);
+    expect([r.reactivity, r.hop, r.bassTilt, r.pulse, r.reduceMotion]).toEqual([0.5, 0.5, false, 0, true]);
     const moved = resolveParams({ ...defaults, reactivity: 1.5 }, "high", true, createResolved());
-    expect([moved.reactivity, moved.hop, moved.bassTilt, moved.reduceMotion]).toEqual([1.5, 1, true, true]);
+    expect([moved.reactivity, moved.hop, moved.bassTilt, moved.pulse, moved.reduceMotion]).toEqual([1.5, 1, true, 1, true]);
+    expect(resolveParams(defaults, "high", false, createResolved()).pulse).toBe(1);
   });
 
   it("writes into and returns the object it is given", () => {

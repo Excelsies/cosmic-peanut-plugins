@@ -21,7 +21,7 @@ const REDUCED_HOP = 0.5;
 const RANGES = { complexity: [0.5, 2, 1], reactivity: [0, 2, DEFAULT_REACTIVITY], hop: [0, 2, 1] };
 
 export function createResolved() {
-  return { palette: 0, backdrop: 0, grains: GRAIN_COUNTS[DEFAULT_GRAINS], complexity: 1, reactivity: 1, hop: 1, bassTilt: true, reduceMotion: false };
+  return { palette: 0, backdrop: 0, grains: GRAIN_COUNTS[DEFAULT_GRAINS], complexity: 1, reactivity: 1, hop: 1, bassTilt: true, pulse: 1, reduceMotion: false };
 }
 
 /** @param {unknown} v @param {readonly string[]} options @param {number} fallback */
@@ -54,6 +54,7 @@ export function resolveParams(params, quality, reduceMotion, out) {
   out.reactivity = calm ? REDUCED_REACTIVITY : react;
   out.hop = calm ? hop * REDUCED_HOP : hop;
   out.bassTilt = !calm;
+  out.pulse = calm ? 0 : 1;
   out.reduceMotion = reduceMotion;
   return out;
 }

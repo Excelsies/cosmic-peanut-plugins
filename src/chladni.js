@@ -6,8 +6,9 @@
  * figure from a table of plate modes (lib/modes.js); sand grains, simulated on the GPU with
  * transform feedback (shaders/chladni/update.vert, constants in lib/sand.js), are shaken off the
  * antinodes and drift into the node lines, so the figure draws itself and re-forms whenever the
- * note changes. Bass-led kicks (lib/kick.js) make every grain hop, at most one hop per
- * 0.4 s; hats add fizz, bass and stereo balance tilt the plate, silence freezes the sand where it
+ * note changes. Every beat hit (lib/hits.js: kicks, snares, claps, stomps) makes the sand hop, more
+ * of it, higher and wider the heavier the bass under the hit, and shakes the plate harder for a
+ * moment; hats add fizz, bass and stereo balance tilt the plate, silence freezes the sand where it
  * lies.
  *
  * Per frame: 1–4 feedback steps (1/120 s each), one additive POINTS pass into a half-resolution
@@ -19,7 +20,7 @@ import { createFeedbackProgram } from "./lib/feedback.js";
 import { createProgram, createTarget } from "./lib/gl.js";
 import { createResolved, paletteColors, PLATE_FINISH, resolveParams } from "./lib/chladni-params.js";
 import { buildModeTable, createCrossfade, MODE_STRIDE, START_MODE } from "./lib/modes.js";
-import { createKick } from "./lib/kick.js";
+import { createHits } from "./lib/hits.js";
 import { createModeGate, createPitch } from "./lib/pitch.js";
 import {
   AIR_DRAG,
@@ -140,17 +141,21 @@ export default async function create(ctx) {
   const fade = createCrossfade(START_MODE);
   const plateDrive = createPlateDrive();
   const hop = createHop();
-  const kick = createKick();
+  const hits = createHits();
   const clock = createFixedStep(SIM_STEP, MAX_STEPS);
   const stereo = createStereo();
   const field = new Float32Array(4);
   const drive = new Float32Array(4);
   const tilt = new Float32Array(4);
+  const hopU = new Float32Array(4);
   const k = new Float32Array([K_DRIFT, K_SHAKE, K_FIZZ, G_TILT]);
   const k2 = new Float32Array([DAMPING, AIR_DRAG, RESTITUTION, GRAVITY]);
   let stepCount = 0;
+  // A hop waits here until the next simulation step (a 144 Hz frame may run none); hops and grows
+  // that arrive meanwhile merge by max.
   let pendingVz = 0;
   let pendingScatter = 0;
+  let pendingFraction = 0;
   let seq = 0;
 
   return {
@@ -158,19 +163,20 @@ export default async function create(ctx) {
       const dt = time.dt;
       if (ctx.reduceMotion !== lastReduceMotion || ctx.quality !== lastQuality) applyParams();
 
-      // Audio → kick, figure, drive, tilt, hop.
-      const kicked = kick.step(audio, dt);
+      // Audio → hits, figure, drive, tilt, hop.
+      const hit = hits.step(audio, dt);
       pitch.setSampleRate(audio.sampleRate);
       const midi = audio.silent ? NaN : pitch.midi(audio.spectrum);
       fade.switchTo(gate.step(midi, audio.onset, dt, res.complexity), res.reduceMotion);
       fade.step(dt);
       // sand.js takes +1 = left heavy; stereo.js gives +1 = right heavy.
       const balance = -stereoFrame(audio.left, audio.right, stereo).balance;
-      const pd = plateDrive.step(audio, balance, res.reactivity, res.bassTilt, dt);
-      const hp = hop.step(kicked, kick.strength, res.hop, dt, ctx.reduceFlashing);
+      const hp = hop.step(hit, res.hop, dt, ctx.reduceFlashing);
+      const pd = plateDrive.step(audio, balance, res.reactivity, res.bassTilt, res.pulse, hit, dt);
       if (hp.impulse > 0) {
-        pendingVz = hp.impulse;
-        pendingScatter = hp.scatter;
+        pendingVz = Math.max(pendingVz, hp.impulse);
+        pendingScatter = Math.max(pendingScatter, hp.scatter);
+        pendingFraction = Math.max(pendingFraction, hp.fraction);
         seq = hp.seq;
       }
 
@@ -197,14 +203,17 @@ export default async function create(ctx) {
         gl.uniform4fv(u.u_drive, drive);
         gl.uniform4fv(u.u_k, k);
         gl.uniform4fv(u.u_k2, k2);
+        gl.uniform4fv(u.u_tilt, tilt);
         gl.uniform1ui(u.u_seq, seq);
         gl.enable(gl.RASTERIZER_DISCARD);
         for (let s = 0; s < steps; s++) {
-          tilt[2] = pendingVz;
-          tilt[3] = pendingScatter;
+          hopU[0] = pendingVz;
+          hopU[1] = pendingScatter;
+          hopU[2] = pendingFraction;
           pendingVz = 0;
           pendingScatter = 0;
-          gl.uniform4fv(u.u_tilt, tilt);
+          pendingFraction = 0;
+          gl.uniform4fv(u.u_hop, hopU);
           gl.uniform1ui(u.u_step, stepCount++ >>> 0);
           const next = 1 - cur;
           gl.bindVertexArray(vaos[cur]);

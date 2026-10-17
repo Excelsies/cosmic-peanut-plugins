@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createPlateDrive, flightTime, GRAIN_FLOATS, HAZE_PEAK, hopVz0, MIN_HOP_GAP, seedGrains } from "./sand.js";
+import { createHop, createPlateDrive, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -42,110 +42,149 @@ function maxPerSecond(times) {
   return best;
 }
 
+/** A hit as createHits().out gives it. @param {boolean} fire @param {number} weight @param {boolean} [grow] */
+const hit = (fire, weight, grow = false) => ({ fire, grow, weight });
+const NONE = hit(false, 0);
+
 /**
- * Run createHop on a kick train (one confirmed kick every `period` s, on whole frames).
+ * Run createHop on a train of hits of weight `w`, one every `period` s on whole frames.
  * @param {number} period @param {boolean} reduce @param {number} dt
  */
-function kickTrain(period, reduce, dt = DT, seconds = 4, strength = 1) {
+function hitTrain(period, reduce, dt = DT, seconds = 4, w = 1) {
   const hop = createHop();
   /** @type {number[]} */ const hops = [];
+  /** @type {number[]} */ const sizes = [];
   /** @type {number[]} */ const haze = [];
   const every = Math.round(period / dt);
   for (let i = 0; i < Math.round(seconds / dt); i++) {
-    const h = hop.step(i % every === 0, strength, 1, dt, reduce);
-    if (h.impulse > 0) hops.push(i * dt);
+    const h = hop.step(i % every === 0 ? hit(true, w) : NONE, 1, dt, reduce);
+    if (h.impulse > 0) {
+      hops.push(i * dt);
+      sizes.push(h.fraction);
+    }
     haze.push(h.haze);
   }
-  return { hops, haze };
+  return { hops, sizes, haze };
 }
 
 describe("hop", () => {
-  it("exports the gap and the haze peak", () => {
-    expect([MIN_HOP_GAP, HAZE_PEAK]).toEqual([0.4, 0.5]);
+  it("exports the hop constants", () => {
+    expect([F_MIN, SCATTER, W_HAZE, HAZE_PEAK]).toEqual([0.3, 0.12, 0.7, 0.25]);
   });
 
-  it("launches grains for a 0.15 s flight at Hop 1 and full strength", () => {
+  it("launches grains for a 0.15 s flight at Hop 1 and full weight", () => {
     expect(flightTime(hopVz0(1, 1))).toBeCloseTo(0.15, 6);
     expect(flightTime(hopVz0(1, 0))).toBeCloseTo(0.06, 6);
     expect(hopVz0(0, 1)).toBe(0);
   });
 
-  it("keeps hops at least 0.4 s apart: a 4 kicks/s train hops on every other kick, flashing limited or not", () => {
-    for (const reduce of [false, true]) {
-      const { hops } = kickTrain(0.25, reduce);
-      expect(hops).toHaveLength(8);
-      hops.forEach((t, i) => expect(t).toBeCloseTo(0.5 * i, 9));
+  it("grades the share of grains, the launch speed and the scatter by weight, scaled by Hop", () => {
+    for (const hopParam of [0, 1, 2]) {
+      for (const w of [0, 0.5, 1]) {
+        const h = createHop().step(hit(true, w), hopParam, DT, false);
+        if (hopParam === 0) {
+          expect([h.impulse, h.scatter, h.fraction, h.seq, h.haze]).toEqual([0, 0, 0, 0, 0]);
+          continue;
+        }
+        expect(h.impulse).toBeCloseTo(GRAVITY * 0.075 * hopParam * (0.4 + 0.6 * w), 9);
+        expect(h.fraction).toBeCloseTo(0.3 + 0.7 * w, 9);
+        expect(h.scatter).toBeCloseTo(0.12 * hopParam * w * w, 9);
+      }
     }
   });
 
-  it("hops on every kick 0.45 s apart, and on every kick exactly 0.4 s apart", () => {
-    for (const reduce of [false, true]) {
-      expect(kickTrain(0.45, reduce, 1 / 60, 4.5).hops).toHaveLength(10);
-      expect(kickTrain(0.4, reduce, 1 / 60).hops).toHaveLength(10);
-      expect(kickTrain(0.4, reduce, 1 / 120).hops).toHaveLength(10);
-    }
+  it("counts a new hop only on a fire; a grow re-sends a bigger hop under the same seq", () => {
+    const hop = createHop();
+    const a = hop.step(hit(true, 0.3), 1, DT, true);
+    expect([a.seq, a.fraction]).toEqual([1, expect.closeTo(0.51, 9)]);
+    const b = hop.step(hit(false, 0.6, true), 1, DT, true);
+    expect(b).toBe(a);
+    expect(b.seq).toBe(1);
+    expect(b.fraction).toBeCloseTo(0.72, 9);
+    expect(b.impulse).toBeCloseTo(hopVz0(1, 0.6), 9);
+    const c = hop.step(NONE, 1, DT, true);
+    expect([c.impulse, c.scatter, c.fraction, c.seq]).toEqual([0, 0, 0, 1]);
+    for (let i = 0; i < 20; i++) hop.step(NONE, 1, DT, true);
+    expect(hop.step(hit(true, 0.1), 1, DT, true).seq).toBe(2);
   });
 
-  it("stays within 3 hops and 3 flashes per second under a 10 Hz kick train with reduce flashing", () => {
-    for (const dt of [1 / 60, 1 / 120]) {
-      const { hops, haze } = kickTrain(0.1, true, dt);
-      expect(hops.length).toBeGreaterThan(4); // still reacts
-      expect(maxPerSecond(hops)).toBeLessThanOrEqual(3);
+  it("hazes only hits over weight 0.7, holds it through the weight window, then decays it with τ 0.15 s", () => {
+    for (const w of [0, 0.5, 0.7]) {
+      const hop = createHop();
+      expect(hop.step(hit(true, w), 1, DT, true).haze).toBe(0);
+    }
+    for (const w of [0.85, 1]) {
+      const peak = (0.25 * (w - 0.7)) / 0.3;
+      const hop = createHop();
+      expect(hop.step(hit(true, w), 1, DT, true).haze).toBeCloseTo(peak, 9);
+      // 1/60 and 2/60 s are inside the 43 ms window: held.
+      expect(hop.step(NONE, 1, DT, true).haze).toBeCloseTo(peak, 9);
+      expect(hop.step(NONE, 1, DT, true).haze).toBeCloseTo(peak, 9);
+      expect(hop.step(NONE, 1, DT, true).haze).toBeCloseTo(peak * Math.exp(-DT / 0.15), 9);
+    }
+    // A grow inside the window raises the held haze as part of the same rise.
+    const hop = createHop();
+    hop.step(hit(true, 0.8), 1, DT, true);
+    expect(hop.step(hit(false, 1, true), 1, DT, true).haze).toBeCloseTo(0.25, 9);
+  });
+
+  it("downgrades a bright hit the limiter refuses to weight 0.7, never drops it", () => {
+    const hop = createHop();
+    hop.step(hit(true, 1), 1, DT, true);
+    for (let i = 0; i < 11; i++) hop.step(NONE, 1, DT, true); // 0.2 s later, haze falling
+    const before = hop.step(NONE, 1, DT, true).haze;
+    const h = hop.step(hit(true, 1), 1, DT, true);
+    expect(h.seq).toBe(2);
+    expect(h.fraction).toBeCloseTo(0.3 + 0.7 * 0.7, 9);
+    expect(h.impulse).toBeCloseTo(hopVz0(1, 0.7), 9);
+    expect(h.scatter).toBeCloseTo(0.12 * 0.49, 9);
+    expect(h.haze).toBeLessThanOrEqual(before);
+    // Reduce flashing off: the same hit is not downgraded.
+    const free = createHop();
+    free.step(hit(true, 1), 1, DT, false);
+    for (let i = 0; i < 12; i++) free.step(NONE, 1, DT, false);
+    const f = free.step(hit(true, 1), 1, DT, false);
+    expect(f.fraction).toBe(1);
+    expect(f.haze).toBeCloseTo(0.25, 9);
+  });
+
+  it("hops on every hit of a 10 Hz train of full-weight hits, with at most 3 haze rises per second", () => {
+    for (const dt of [1 / 60, 1 / 144]) {
+      const { hops, sizes, haze } = hitTrain(0.1, true, dt);
+      expect(hops.length).toBe(Math.ceil(Math.round(4 / dt) / Math.round(0.1 / dt)));
+      expect(sizes.every((f) => f >= 0.79 - 1e-9)).toBe(true);
       expect(maxPerSecond(flashStarts(haze, dt, 0.05))).toBeLessThanOrEqual(3);
     }
   });
 
-  it("raises the haze to 0.5·(0.4 + 0.6·strength) on the hop frame, then decays it with τ 0.15 s", () => {
-    for (const [s, peak] of [
-      [1, 0.5],
-      [0, 0.2],
-      [2, 0.5],
-    ]) {
-      const hop = createHop();
-      expect(hop.step(true, s, 1, DT, true).haze).toBeCloseTo(peak, 9);
-      expect(hop.step(false, s, 1, DT, true).haze).toBeCloseTo(peak * Math.exp(-DT / 0.15), 9);
-    }
-  });
-
-  it("never raises the haze without a hop", () => {
+  it("never raises the haze without a hit", () => {
     const hop = createHop();
-    hop.step(true, 1, 1, DT, true);
-    const strengths = [0.9, 0.1, 1, 0.4, 0.7, 0, 0.55, 0.3];
-    let last = hop.step(false, 1, 1, DT, true).haze;
+    hop.step(hit(true, 1), 1, DT, true);
+    let last = hop.step(NONE, 1, DT, true).haze;
     for (let i = 0; i < 300; i++) {
-      const h = hop.step(false, strengths[i % strengths.length], 1, DT, i % 2 === 0).haze;
+      const h = hop.step(hit(false, i % 3 / 2), 1, DT, i % 2 === 0).haze;
       expect(h).toBeLessThanOrEqual(last);
       last = h;
     }
   });
 
-  it("reports the impulse once per admitted kick with scatter and a new sequence number", () => {
-    const hop = createHop();
-    const a = hop.step(true, 0.5, 2, DT, true);
-    expect(a.impulse).toBeCloseTo(hopVz0(2, 0.5));
-    expect(a.scatter).toBeCloseTo(0.25 * 0.5 * 2);
-    expect(a.seq).toBe(1);
-    const b = hop.step(false, 0, 2, DT, true);
-    expect(b).toBe(a);
-    expect([b.impulse, b.scatter, b.seq]).toEqual([0, 0, 1]);
-  });
-
   it("treats a NaN or negative dt as 0 and keeps hopping afterwards", () => {
     const hop = createHop();
-    expect(hop.step(true, 1, 1, DT, false).seq).toBe(1);
-    hop.step(false, 0, 1, NaN, false);
-    hop.step(false, 0, 1, -1, false);
-    for (let i = 0; i < 30; i++) hop.step(false, 0, 1, DT, false);
-    const h = hop.step(true, 1, 1, DT, false);
+    expect(hop.step(hit(true, 1), 1, DT, false).seq).toBe(1);
+    hop.step(NONE, 1, NaN, false);
+    hop.step(NONE, 1, -1, false);
+    for (let i = 0; i < 30; i++) hop.step(NONE, 1, DT, false);
+    const h = hop.step(hit(true, NaN), 1, NaN, false);
     expect(h.seq).toBe(2);
+    expect(h.fraction).toBeCloseTo(0.3, 9);
     expect(Number.isFinite(h.haze)).toBe(true);
   });
 
   it("does nothing at Hop 0", () => {
     const hop = createHop();
     for (let i = 0; i < 60; i++) {
-      const h = hop.step(i % 30 === 0, 1, 0, DT, false);
-      expect([h.impulse, h.haze, h.seq]).toEqual([0, 0, 0]);
+      const h = hop.step(hit(i % 30 === 0, 1), 0, DT, false);
+      expect([h.impulse, h.fraction, h.haze, h.seq]).toEqual([0, 0, 0, 0]);
     }
   });
 });
@@ -157,48 +196,110 @@ describe("createPlateDrive", () => {
   it("drives clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5) · reactivity, frame-rate independent", () => {
     for (const hz of [60, 120]) {
       const d = createPlateDrive();
-      let s = d.step(audio({ midAtt: 3, rms: 0.2 }), 0, 1, true, 1 / hz);
-      for (let i = 1; i < hz; i++) s = d.step(audio({ midAtt: 3, rms: 0.2 }), 0, 1, true, 1 / hz);
+      let s = d.step(audio({ midAtt: 3, rms: 0.2 }), 0, 1, true, 0, NONE, 1 / hz);
+      for (let i = 1; i < hz; i++) s = d.step(audio({ midAtt: 3, rms: 0.2 }), 0, 1, true, 0, NONE, 1 / hz);
       expect(s.drive).toBeCloseTo(1.8, 3);
     }
     const d = createPlateDrive();
-    let s = d.step(audio({ midAtt: 2, rms: 1 }), 0, 0.5, true, 1);
+    let s = d.step(audio({ midAtt: 2, rms: 1 }), 0, 0.5, true, 0, NONE, 1);
     expect(s.drive).toBeCloseTo(1.25, 3);
-    s = d.step(audio({ midAtt: 2, rms: 1 }), 0, 0.5, true, 0.0001);
+    s = d.step(audio({ midAtt: 2, rms: 1 }), 0, 0.5, true, 0, NONE, 0.0001);
     expect(s.drive).toBeCloseTo(1.25, 3);
   });
 
   it("falls to rest within 0.3 s of silence, fizz and all", () => {
     const d = createPlateDrive();
-    for (let i = 0; i < 60; i++) d.step(audio({ midAtt: 2, rms: 0.3, trebAtt: 2, flux: 1 }), 0, 1, true, DT);
-    let s = d.step(audio({ silent: true }), 0, 1, true, DT);
+    for (let i = 0; i < 60; i++) d.step(audio({ midAtt: 2, rms: 0.3, trebAtt: 2, flux: 1 }), 0, 1, true, 0, NONE, DT);
+    let s = d.step(audio({ silent: true }), 0, 1, true, 0, NONE, DT);
     expect(s.fizz).toBe(0);
-    for (let i = 1; i < 18; i++) s = d.step(audio({ silent: true, rms: 0 }), 0, 1, true, DT);
+    for (let i = 1; i < 18; i++) s = d.step(audio({ silent: true, rms: 0 }), 0, 1, true, 0, NONE, DT);
     expect(s.drive).toBeLessThan(0.1);
   });
 
   it("fizz = clamp(trebAtt − 1, 0, 2) · 0.5 + flux · 0.5", () => {
     const d = createPlateDrive();
-    expect(d.step(audio({ trebAtt: 4, flux: 0.4 }), 0, 1, true, DT).fizz).toBeCloseTo(1.2);
-    expect(d.step(audio({ trebAtt: 0.5, flux: 0 }), 0, 1, true, DT).fizz).toBe(0);
+    expect(d.step(audio({ trebAtt: 4, flux: 0.4 }), 0, 1, true, 0, NONE, DT).fizz).toBeCloseTo(1.2);
+    expect(d.step(audio({ trebAtt: 0.5, flux: 0 }), 0, 1, true, 0, NONE, DT).fizz).toBe(0);
   });
 
   it("tilts with balance and bass, and stays exactly level for mono sources", () => {
     const d = createPlateDrive();
-    let s = d.step(audio(), 0, 1, true, DT);
-    for (let i = 0; i < 300; i++) s = d.step(audio({ bassAtt: 1 }), 0, 1, true, DT);
+    let s = d.step(audio(), 0, 1, true, 0, NONE, DT);
+    for (let i = 0; i < 300; i++) s = d.step(audio({ bassAtt: 1 }), 0, 1, true, 0, NONE, DT);
     expect([s.tiltX, s.tiltY]).toEqual([0, 0]);
-    for (let i = 0; i < 600; i++) s = d.step(audio({ bassAtt: 3 }), 1, 1, true, DT);
+    for (let i = 0; i < 600; i++) s = d.step(audio({ bassAtt: 3 }), 1, 1, true, 0, NONE, DT);
     expect(s.tiltX).toBeCloseTo(0.6, 3);
     expect(s.tiltY).toBeCloseTo(0.15, 3);
-    for (let i = 0; i < 600; i++) s = d.step(audio({ bassAtt: 3 }), 1, 1, false, DT);
+    for (let i = 0; i < 600; i++) s = d.step(audio({ bassAtt: 3 }), 1, 1, false, 0, NONE, DT);
     expect(s.tiltY).toBeCloseTo(0, 3);
   });
 
   it("treats missing fields as neutral", () => {
     const d = createPlateDrive();
-    const s = d.step({ midAtt: NaN, rms: undefined, silent: false, trebAtt: undefined, flux: NaN, bassAtt: undefined }, 0, 1, true, DT);
+    const s = d.step({ midAtt: NaN, rms: undefined, silent: false, trebAtt: undefined, flux: NaN, bassAtt: undefined }, 0, 1, true, 0, NONE, DT);
     expect(Number.isFinite(s.drive) && Number.isFinite(s.fizz) && Number.isFinite(s.tiltY)).toBe(true);
+  });
+
+  it("exports the pulse constants", () => {
+    expect([K_PULSE, PULSE_TAU, PULSE_BASE, DRIVE_PEAK]).toEqual([1, 0.12, 0.4, 3]);
+  });
+
+  it("pulses the drive on a hit by 0.4 + 0.6·weight, decaying with τ 0.12 s, and to 0 on silence", () => {
+    const steady = audio({ midAtt: 1, rms: 0.1 }); // drive 0.9
+    for (const w of [0, 0.5, 1]) {
+      const d = createPlateDrive();
+      for (let i = 0; i < 240; i++) d.step(steady, 0, 1, true, 1, NONE, DT);
+      const p = 0.4 + 0.6 * w;
+      let s = d.step(steady, 0, 1, true, 1, hit(true, w), DT);
+      expect(s.pulse).toBeCloseTo(p, 9);
+      expect(s.drive).toBeCloseTo(0.9 * (1 + p), 6);
+      s = d.step(steady, 0, 1, true, 1, NONE, DT);
+      expect(s.pulse).toBeCloseTo(p * Math.exp(-DT / 0.12), 9);
+      expect(s.drive).toBeCloseTo(0.9 * (1 + s.pulse), 6);
+      // a grow lifts it, a lighter hit doesn't lower it
+      s = d.step(steady, 0, 1, true, 1, hit(false, 1, true), DT);
+      expect(s.pulse).toBeCloseTo(1, 9);
+      s = d.step(steady, 0, 1, true, 1, hit(true, 0), DT);
+      expect(s.pulse).toBeCloseTo(Math.exp(-DT / 0.12), 9);
+      s = d.step(audio({ silent: true }), 0, 1, true, 1, hit(true, 1), DT);
+      expect(s.pulse).toBe(0);
+    }
+  });
+
+  it("caps the pulsed drive at 3·reactivity", () => {
+    for (const react of [0.5, 2]) {
+      const d = createPlateDrive();
+      const loud = audio({ midAtt: 2, rms: 1 }); // base 2.5·reactivity
+      for (let i = 0; i < 240; i++) d.step(loud, 0, react, true, 1, NONE, DT);
+      expect(d.step(loud, 0, react, true, 1, hit(true, 1), DT).drive).toBeCloseTo(3 * react, 9);
+    }
+  });
+
+  it("reproduces the unpulsed drive exactly with pulse gain 0", () => {
+    const a = createPlateDrive();
+    const b = createPlateDrive();
+    for (let i = 0; i < 300; i++) {
+      const au = audio({ midAtt: 1 + (i % 7) / 3, rms: (i % 5) / 10, silent: i % 97 > 90 });
+      const sa = a.step(au, 0, 2, true, 0, i % 13 === 0 ? hit(true, 1) : NONE, DT).drive;
+      expect(b.step(au, 0, 2, true, 0, NONE, DT).drive).toBe(sa);
+    }
+  });
+
+  it("pulses the same at 60 and 144 fps", () => {
+    /** @param {number} hz */
+    const at = (hz) => {
+      const d = createPlateDrive();
+      /** @type {number[]} */ const samples = [];
+      for (let i = 1; i <= hz; i++) {
+        const s = d.step(audio(), 0, 1, true, 1, i === hz / 2 ? hit(true, 0.5) : NONE, 1 / hz);
+        if (i === hz / 2 || i === (hz * 3) / 4 || i === hz) samples.push(s.pulse);
+      }
+      return samples;
+    };
+    const a = at(60);
+    const b = at(144);
+    for (let k = 0; k < 3; k++) expect(b[k]).toBeCloseTo(a[k], 9);
+    expect(a[1]).toBeCloseTo(0.7 * Math.exp(-0.25 / 0.12), 9);
   });
 });
 

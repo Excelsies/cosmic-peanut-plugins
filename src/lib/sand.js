@@ -12,13 +12,14 @@
  *
  * where u is the standing-wave field and ξ a hashed unit-variance direction. ∇(u²) pulls sand
  * down into the node lines (u = 0); the shake is strongest on antinodes, so grains there jitter
- * off them, and vanishes on the nodes, so lines stay crisp. A kick (lib/kick.js) launches every
- * grain with vz0 = GRAVITY·0.075·hop·(0.4 + 0.6·strength) (a 0.15 s flight at full strength) and a
- * hashed lateral scatter, at most once per MIN_HOP_GAP; airborne grains fly ballistically with only
- * AIR_DRAG and land with z = 0.
+ * off them, and vanishes on the nodes, so lines stay crisp. A beat hit (lib/hits.js) of weight w
+ * launches F_MIN + (1 − F_MIN)·w of the grounded grains with vz0 = GRAVITY·0.075·hop·(0.4 + 0.6·w)
+ * (a 0.15 s flight at full weight) and a hashed lateral scatter; airborne grains fly ballistically
+ * with only AIR_DRAG and land with z = 0.
  * Edges reflect with RESTITUTION.
  */
 import { createFlashLimiter } from "./flash.js";
+import { WEIGHT_WIN } from "./hits.js";
 
 export const GRAIN_FLOATS = 6;
 export const SIM_STEP = 1 / 120;
@@ -42,23 +43,33 @@ export const GRAVITY = 4;
 const SILENT_TAU = 0.075;
 /** The hop's dust haze decays with this time constant (s). */
 const HAZE_TAU = 0.15;
-/**
- * Seconds between hops, at least: one beat at 150 bpm. At fast tempos it keeps the stronger
- * pattern kicks (dnb's downbeat and its beat-2.5 kick, not the follow-up 172 ms after the
- * downbeat), and it holds hops at or under 2.5 per second whatever the music does. In seconds, not
- * beats: a tracker locked at half tempo would stretch a beat-based gap onto the wrong kicks.
- */
-export const MIN_HOP_GAP = 0.4;
-/** Haze peak at full kick strength; 0.4 of it at strength 0. */
-export const HAZE_PEAK = 0.5;
+/** Share of the grounded grains a hop of weight 0 launches (all of them at weight 1). */
+export const F_MIN = 0.3;
+/** Lateral scatter speed at weight 1 and Hop 1 (it grows with weight²). */
+export const SCATTER = 0.12;
+/** Hits heavier than this carry a haze; a bright hit the flash limiter refuses hops at this weight. */
+export const W_HAZE = 0.7;
+/** Haze at weight 1. */
+export const HAZE_PEAK = 0.25;
+/** Drive pulse per hit: up by K_PULSE·(PULSE_BASE + (1 − PULSE_BASE)·weight), decaying with τ PULSE_TAU s. */
+export const K_PULSE = 1;
+export const PULSE_TAU = 0.12;
+export const PULSE_BASE = 0.4;
+/** The pulsed drive stays at or under DRIVE_PEAK·reactivity. */
+export const DRIVE_PEAK = 3;
+
+/** @param {unknown} v @param {number} fallback */
+const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+/** @param {number} v @param {number} lo @param {number} hi */
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 /**
  * Launch speed for a hop. @param {number} hop the Hop param (already reduced for reduce motion)
- * @param {number} strength audio.onsetStrength, clamped to 0–1
+ * @param {number} weight the hit's weight, clamped to 0–1
  */
-export function hopVz0(hop, strength) {
-  const s = strength > 1 ? 1 : strength > 0 ? strength : 0;
-  return hop > 0 ? GRAVITY * 0.075 * hop * (0.4 + 0.6 * s) : 0;
+export function hopVz0(hop, weight) {
+  const w = weight > 1 ? 1 : weight > 0 ? weight : 0;
+  return hop > 0 ? GRAVITY * 0.075 * hop * (0.4 + 0.6 * w) : 0;
 }
 
 /** Seconds from launch to landing. @param {number} vz0 */
@@ -67,78 +78,96 @@ export function flightTime(vz0) {
 }
 
 /**
- * Kick → hop. A confirmed kick (lib/kick.js) launches the grains if the last hop was at least
- * MIN_HOP_GAP ago, and raises the dust-haze envelope to HAZE_PEAK·(0.4 + 0.6·strength), which
- * then decays with τ HAZE_TAU. The envelope still goes through the photosensitivity limiter (at
- * most 3 rises per second) as a guarantee; with the gap it never has to step in, so hops are the
- * same with reduce flashing on or off. Kicks inside the gap do nothing. `step` returns the same
- * object every call: `impulse` (vz0, non-zero only on the frame of a hop), `scatter` (lateral
- * speed), `seq` (hop counter, seeds the scatter hash) and `haze` (the limited envelope, 0–1).
+ * Hit → hop. Every hit (lib/hits.js) launches F_MIN + (1 − F_MIN)·w of the grounded grains at
+ * hopVz0(hop, w) with lateral scatter SCATTER·hop·w²; a grow re-sends the bigger hop under the
+ * same `seq`, so the shader launches only the extra grains. Hits over W_HAZE also raise the dust
+ * haze to HAZE_PEAK·(w − W_HAZE)/(1 − W_HAZE), held through the weight window and then decaying
+ * with τ HAZE_TAU, through the photosensitivity limiter (at most 3 rises per second under reduce
+ * flashing). A bright hit the limiter refuses still hops, at weight W_HAZE and with no haze rise.
+ * `step` returns the same object every call: `impulse` (vz0, non-zero only on hop frames),
+ * `scatter`, `fraction`, `seq` (hop counter, seeds the launch hash) and `haze` (0–1).
  */
 export function createHop() {
   const limiter = createFlashLimiter();
   let env = 0;
+  let hold = 0;
   let since = Infinity;
-  const out = { impulse: 0, scatter: 0, seq: 0, haze: 0 };
+  const out = { impulse: 0, scatter: 0, fraction: 0, seq: 0, haze: 0 };
   return {
     /**
-     * @param {boolean} kick a confirmed kick on this frame (createKick().step)
-     * @param {number} strength the kick's strength (createKick().strength), clamped to 0–1
+     * @param {{ fire: boolean, grow: boolean, weight: number }} hit createHits().out
      * @param {number} hop effective Hop param
      * @param {number} dt
      * @param {boolean} reduceFlashing
      */
-    step(kick, strength, hop, dt, reduceFlashing) {
-      const d = dt > 0 ? dt : 0; // NaN too, or `since` would stay NaN and stop hops for good
+    step(hit, hop, dt, reduceFlashing) {
+      const d = dt > 0 ? dt : 0; // NaN too
       since += d;
-      const s = strength > 1 ? 1 : strength > 0 ? strength : 0;
-      const want = kick && hop > 0 && since >= MIN_HOP_GAP - 1e-9;
-      const decayed = env * Math.exp(-d / HAZE_TAU);
-      const target = want ? Math.max(HAZE_PEAK * (0.4 + 0.6 * s), decayed) : decayed;
-      env = limiter.step(target, d, reduceFlashing);
-      const admitted = want && env >= target;
-      out.impulse = admitted ? hopVz0(hop, s) : 0;
-      out.scatter = admitted ? 0.25 * s * hop : 0;
-      if (admitted) {
+      const on = hop > 0 && (hit.fire === true || hit.grow === true);
+      let w = clamp(num(hit.weight, 0), 0, 1);
+      if (on && hit.fire === true) {
         out.seq++;
         since = 0;
+        hold = 0;
       }
+      const hazeT = on && w > W_HAZE ? (HAZE_PEAK * (w - W_HAZE)) / (1 - W_HAZE) : 0;
+      if (since > WEIGHT_WIN + 1e-9) hold = 0;
+      if (hazeT > hold) hold = hazeT;
+      // Held through the window, so a grow continues the same rise instead of starting a new one.
+      env = limiter.step(Math.max(hold, env * Math.exp(-d / HAZE_TAU)), d, reduceFlashing);
+      if (hazeT > 0 && env < hazeT - 1e-12) {
+        w = W_HAZE; // refused: hop anyway, as a hit that carries no haze
+        hold = 0;
+      }
+      out.impulse = on ? hopVz0(hop, w) : 0;
+      out.fraction = on ? F_MIN + (1 - F_MIN) * w : 0;
+      out.scatter = on ? SCATTER * hop * w * w : 0;
       out.haze = hop > 0 ? env : 0;
       return out;
     },
   };
 }
 
-/** @param {unknown} v @param {number} fallback */
-const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
-/** @param {number} v @param {number} lo @param {number} hi */
-const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
-
 /**
  * Smoothed plate excitation from one audio frame. `step` returns the same object every call:
- * - drive: silent ? 0 : clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5)·reactivity, τ 0.1 s
- *   (pull toward the nodes and shake on the antinodes); on silence τ 0.075 s, so the sand
- *   damps and freezes within 0.3 s;
+ * - drive: base·(1 + K_PULSE·pulseGain·pulse), at most DRIVE_PEAK·reactivity, where base =
+ *   silent ? 0 : clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5)·reactivity, τ 0.1 s (pull toward the
+ *   nodes and shake on the antinodes); on silence τ 0.075 s, so the sand damps and freezes
+ *   within 0.3 s;
+ * - pulse: on a hit, max(pulse, PULSE_BASE + (1 − PULSE_BASE)·weight), else decaying with
+ *   τ PULSE_TAU; 0 on silence (the plate shakes harder on each hit, without any brightness);
  * - fizz: clamp(trebAtt − 1, 0, 2)·0.5 + flux·0.5, unsmoothed (hats: per-grain jitter);
  * - tiltX: 0.6·balance·reactivity, τ 0.5 s (sand leans toward the louder channel; exactly 0 for
  *   mono and L = R sources);
  * - tiltY: 0.15·clamp(bassAtt − 1, −1, 1) when bass tilt is on, τ 0.3 s.
  */
 export function createPlateDrive() {
-  const out = { drive: 0, fizz: 0, tiltX: 0, tiltY: 0 };
+  const out = { drive: 0, fizz: 0, tiltX: 0, tiltY: 0, pulse: 0 };
+  let base = 0;
   return {
     /**
      * @param {{ midAtt: any, rms: any, silent: any, trebAtt: any, flux: any, bassAtt: any }} audio
      * @param {number} balance stereo balance −1…1, +1 = left heavy (0 for mono)
      * @param {number} reactivity effective Reactivity
      * @param {boolean} bassTilt false under reduce motion
+     * @param {number} pulseGain 0 under reduce motion's calm rule, else 1
+     * @param {{ fire: boolean, grow: boolean, weight: number }} hit createHits().out
      * @param {number} dt
      */
-    step(audio, balance, reactivity, bassTilt, dt) {
+    step(audio, balance, reactivity, bassTilt, pulseGain, hit, dt) {
       const silent = audio.silent === true;
-      const d = Math.max(0, dt);
-      const drive = silent ? 0 : clamp(0.5 * Math.min(num(audio.midAtt, 1), 2) + 4 * num(audio.rms, 0), 0, 2.5) * reactivity;
-      out.drive += (drive - out.drive) * (1 - Math.exp(-d / (silent ? SILENT_TAU : 0.1)));
+      const d = dt > 0 ? dt : 0;
+      const target = silent ? 0 : clamp(0.5 * Math.min(num(audio.midAtt, 1), 2) + 4 * num(audio.rms, 0), 0, 2.5) * reactivity;
+      base += (target - base) * (1 - Math.exp(-d / (silent ? SILENT_TAU : 0.1)));
+      if (silent) out.pulse = 0;
+      else {
+        out.pulse *= Math.exp(-d / PULSE_TAU);
+        if (hit.fire === true || hit.grow === true) {
+          const p = PULSE_BASE + (1 - PULSE_BASE) * clamp(num(hit.weight, 0), 0, 1);
+          if (p > out.pulse) out.pulse = p;
+        }
+      }
+      out.drive = Math.min(base * (1 + K_PULSE * pulseGain * out.pulse), DRIVE_PEAK * reactivity);
       out.fizz = silent ? 0 : clamp(num(audio.trebAtt, 1) - 1, 0, 2) * 0.5 + clamp(num(audio.flux, 0), 0, 2) * 0.5;
       const tx = 0.6 * balance * reactivity;
       out.tiltX += (tx - out.tiltX) * (1 - Math.exp(-d / 0.5));

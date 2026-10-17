@@ -2,76 +2,141 @@
 // @ts-expect-error -- a Node builtin (tests run in Node); the tsconfig has no @types/node.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { createKick } from "../src/lib/kick.js";
+import { binOf, createHits, HIGH_HZ, LOW_HZ, MID_HZ } from "../src/lib/hits.js";
 import { createHop } from "../src/lib/sand.js";
 
-// Chladni's hop trigger on real host analysis: 3 s of a synthetic 124 bpm house track (kick on
-// every beat, open hat plus a bass note on every off-beat, closed 8th hats), analysed by the host's
-// own analyzer and cut at the analysis rate (dt = 512/48000). Before the kick rule, every generic
-// onset asked for a hop; with reduce flashing the limiter then kept whichever came first, and one
-// stray onset at 7.8933 s moved the whole chain onto the off-beat open hats.
+// Chladni's hops on real host analysis: excerpts of synthetic tracks (house, pop-rock, beatbox,
+// phonk) analysed by the host's own analyzer, at the analysis rate (512/48000 s). Each fixture
+// keeps the band levels hits.js reads (dB over its low, mid and high bins) plus the host's onset
+// fields, and the track's true hits inside the scored window; the first 2 s only warm up the flux
+// history. The replay feeds them the way the runtime does at 60 and 144 fps: each display frame
+// gets the newest analysis frame (resent when none arrived) and carries any onset it skipped.
 
-/** @type {{ dt: number, columns: string[], frames: number[][] }} */
-const FIXTURE = JSON.parse(readFileSync(new URL("./fixtures/chladni-house124.json", import.meta.url), "utf8"));
-/** The kicks the track was built from (s). */
-const KICKS = [7.508063, 7.991937, 8.475812, 8.959687, 9.443542, 9.927417, 10.411292];
-const HOPS = [7.52, 8.0107, 8.4907, 8.9813, 9.4613, 9.9413, 10.432];
-/** Onset frames that are not kicks: the stray hat-plus-bass onset, then two off-beat open hats. */
-const NOT_KICKS = [7.8933, 8.2453, 8.736];
+/**
+ * @typedef {{ source: string, sampleRate: number, scored: [number, number], columns: string[],
+ *   events: { kick: number[], snare: number[], hatOnly: number[] }, frames: number[][] }} Fixture
+ */
+/** @param {string} name @returns {Fixture} */
+const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/chladni-${name}.json`, import.meta.url), "utf8"));
 
-/** Feed the fixture through createKick → createHop at Hop 1. @param {boolean} reduceFlashing */
-function replay(reduceFlashing) {
-  const kick = createKick();
+const amp = (/** @type {number} */ db) => Math.sqrt(10 ** (db / 10));
+
+/**
+ * Replay a fixture through createHits → createHop at Hop 1.
+ * @param {Fixture} fx @param {number} fps @param {boolean} reduceFlashing
+ * @returns {{ t: number, w: number }[]} hops in the scored window: display time and final weight
+ */
+function replay(fx, fps, reduceFlashing) {
+  expect(fx.columns).toEqual(["t", "frameIndex", "onset", "onsetStrength", "onsetAge", "low", "mid", "high"]);
+  const hits = createHits();
   const hop = createHop();
-  const audio = { onset: false, onsetStrength: 0, bass: 0, treb: 0, silent: false };
-  /** @type {number[]} */ const kicks = [];
-  /** @type {number[]} */ const hops = [];
-  /** @type {Map<number, boolean>} */ const onsetKick = new Map();
-  let lastOnset = -1;
-  for (const [t, onset, strength, bass, treb] of FIXTURE.frames) {
-    audio.onset = onset === 1;
+  const sr = fx.sampleRate;
+  const bins = [binOf(LOW_HZ[0], sr), binOf(MID_HZ[0], sr), binOf(HIGH_HZ[0], sr)];
+  const audio = { spectrum: new Float32Array(1024), sampleRate: sr, frameIndex: -1, hostTime: 0, silent: false, onset: false, onsetStrength: 0, onsetAge: 10 };
+  /** @type {{ t: number, w: number }[]} */ const hops = [];
+  const F = fx.frames;
+  const t0 = F[0][0];
+  let next = 0;
+  let latched = -1;
+  let cur = -1;
+  let seq = 0;
+  const end = F[F.length - 1][0];
+  for (let k = 1; t0 + k / fps <= end; k++) {
+    const now = t0 + k / fps;
+    let fresh = false;
+    while (next < F.length && F[next][0] <= now) {
+      if (F[next][2] === 1 && latched < 0) latched = next;
+      cur = next++;
+      fresh = true;
+    }
+    const [t, frameIndex, , strength, age, low, mid, high] = F[cur];
+    audio.spectrum.fill(0);
+    audio.spectrum[bins[0]] = amp(low);
+    audio.spectrum[bins[1]] = amp(mid);
+    audio.spectrum[bins[2]] = amp(high);
+    audio.frameIndex = frameIndex;
+    audio.hostTime = t;
+    audio.onsetAge = age;
     audio.onsetStrength = strength;
-    audio.bass = bass;
-    audio.treb = treb;
+    audio.onset = fresh && latched >= 0;
     if (audio.onset) {
-      lastOnset = t;
-      onsetKick.set(t, false);
+      audio.onsetStrength = F[latched][3];
+      latched = -1;
     }
-    const k = kick.step(audio, FIXTURE.dt);
-    if (k) {
-      kicks.push(t);
-      onsetKick.set(lastOnset, true);
-    }
-    if (hop.step(k, kick.strength, 1, FIXTURE.dt, reduceFlashing).impulse > 0) hops.push(t);
+    const h = hop.step(hits.step(audio), 1, 1 / fps, reduceFlashing);
+    if (h.seq !== seq) {
+      seq = h.seq;
+      if (now >= fx.scored[0] && now <= fx.scored[1]) hops.push({ t: now, w: hits.out.weight });
+      else hops.push({ t: -1, w: 0 });
+    } else if (hits.out.grow && hops.length) hops[hops.length - 1].w = hits.out.weight;
   }
-  return { kicks, hops, onsetKick };
+  return hops.filter((x) => x.t >= 0);
 }
 
-describe("Chladni hops on the house124 trace", () => {
-  it("has the columns the replay reads", () => {
-    expect(FIXTURE.columns.slice(0, 5)).toEqual(["t", "onset", "onsetStrength", "bass", "treb"]);
-    expect(FIXTURE.frames.length).toBe(281);
-  });
+/** Hops with hop − t in [lo, hi] s. @template {{ t: number }} T @param {T[]} hops @param {number} t @returns {T[]} */
+const hopsNear = (hops, t, lo = -0.06, hi = 0.06) => hops.filter((h) => h.t - t >= lo && h.t - t <= hi);
 
-  for (const reduceFlashing of [true, false]) {
-    it(`hops on every kick, 11–22 ms after it, reduce flashing ${reduceFlashing ? "on" : "off"}`, () => {
-      const { hops } = replay(reduceFlashing);
-      expect(hops).toHaveLength(HOPS.length);
-      hops.forEach((t, i) => {
-        expect(t).toBeCloseTo(HOPS[i], 4);
-        expect(t - KICKS[i]).toBeGreaterThanOrEqual(0.011);
-        expect(t - KICKS[i]).toBeLessThanOrEqual(0.022);
+const RATES = [60, 144];
+
+describe("Chladni hops on the house124 trace", () => {
+  const fx = fixture("house124");
+  /** Onset frames that are not kicks: a stray hat-plus-bass onset, then two off-beat open hats. */
+  const NOT_KICKS = [7.8933, 8.2453, 8.736];
+
+  for (const fps of RATES) {
+    for (const rf of [true, false]) {
+      it(`hops on each of the 7 kicks, 0–30 ms after it, and never on the off-beat onsets (${fps} fps, reduce flashing ${rf ? "on" : "off"})`, () => {
+        const hops = replay(fx, fps, rf);
+        expect(fx.events.kick).toHaveLength(7);
+        fx.events.kick.forEach((k) => expect(hopsNear(hops, k, 0, 0.03)).toHaveLength(1));
+        for (const t of NOT_KICKS) expect(hopsNear(hops, t, -0.03, 0.03)).toHaveLength(0);
       });
+    }
+  }
+});
+
+// Pop-rock kicks sit on legato bass-guitar 8ths, so some rise too little to fire: over the whole
+// track 82–87% hop, and on these 30 s 76–84% depending on where the display frames fall.
+for (const [name, share] of /** @type {[string, number][]} */ ([["poprock120", 0.75], ["beatbox96", 0.8]])) {
+  describe(`Chladni hops on the ${name} trace`, () => {
+    const fx = fixture(name);
+    for (const fps of RATES) {
+      it(`hops on ${100 * share}% of the kicks and every snare, and never on a hat alone (${fps} fps)`, () => {
+        const hops = replay(fx, fps, true);
+        const kicks = fx.events.kick.filter((k) => hopsNear(hops, k).length > 0);
+        expect(kicks.length).toBeGreaterThanOrEqual(share * fx.events.kick.length);
+        for (const s of fx.events.snare) expect(hopsNear(hops, s).length).toBeGreaterThan(0);
+        for (const h of fx.events.hatOnly) expect(hopsNear(hops, h, -0.05, 0.05)).toHaveLength(0);
+      });
+    }
+  });
+}
+
+describe("Chladni hop size on the poprock120 trace", () => {
+  it("weighs the kicks heavier than the snares", () => {
+    const fx = fixture("poprock120");
+    for (const fps of RATES) {
+      const hops = replay(fx, fps, true);
+      /** @param {number[]} times */
+      const meanW = (times) => {
+        const ws = times.flatMap((t) => hopsNear(hops, t).map((h) => h.w));
+        return ws.reduce((a, b) => a + b, 0) / ws.length;
+      };
+      expect(meanW(fx.events.kick)).toBeGreaterThan(meanW(fx.events.snare) + 0.1);
+    }
+  });
+});
+
+describe("Chladni hops on the phonk130 trace", () => {
+  const fx = fixture("phonk130");
+  for (const fps of RATES) {
+    it(`hops on 85% of the kicks, and at most 15% of hops land on a hat alone (${fps} fps)`, () => {
+      const hops = replay(fx, fps, true);
+      const kicks = fx.events.kick.filter((k) => hopsNear(hops, k).length > 0);
+      expect(kicks.length).toBeGreaterThanOrEqual(0.85 * fx.events.kick.length);
+      const near = (/** @type {number} */ t, /** @type {number[]} */ ev) => ev.some((e) => Math.abs(t - e) <= 0.05);
+      const onHat = hops.filter((h) => near(h.t, fx.events.hatOnly) && !near(h.t, fx.events.kick) && !near(h.t, fx.events.snare));
+      expect(onHat.length).toBeLessThanOrEqual(0.15 * hops.length);
     });
   }
-
-  it("rejects the stray onset and the open hats that used to take the hop", () => {
-    const { onsetKick } = replay(true);
-    for (const t of NOT_KICKS) expect(onsetKick.get(t)).toBe(false);
-  });
-
-  it("confirms kicks only right after a real kick", () => {
-    const { kicks } = replay(true);
-    for (const t of kicks) expect(KICKS.some((k) => t - k >= 0 && t - k <= 0.03)).toBe(true);
-  });
 });

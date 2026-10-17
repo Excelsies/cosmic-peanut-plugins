@@ -37,13 +37,14 @@ Sand on a ringing brass plate. The window is the plate, edge to edge: warm brush
 static diagonal sheen, and dark iron filings that gather into the standing-wave figure of the note
 you hear (lattices, crosses, nested diamonds, curved butterflies). Higher notes give finer figures
 with more cells. When the note changes the two figures crossfade over 0.4 s and the sand visibly
-streams from the old lines to the new ones. A kick (a hit whose bass jumps more than its treble,
-so not a hat, snare or clap) makes every grain hop, at most once every 0.4 s: for about 150 ms the
-figure dissolves into airborne dust with a faint haze and a small offset shadow, then lands and
-re-sharpens. Hops land on the kick itself, about 25 ms after it, and at fast tempos the gap keeps
-the stronger pattern hits. Music with no drums rarely hops; the sand just follows the notes. Hats
-add a fine fizz, bass and stereo balance tilt the plate slightly, and silence freezes the last
-figure where it lies. Renderer: `webgl2`.
+streams from the old lines to the new ones. Every kick, snare, clap or stomp makes the sand hop,
+and the heavier the bass under the hit, the bigger the hop: a light snare lifts a third of the
+grains a little way, a heavy kick or 808 throws them all up and scatters them, and the figure
+dissolves into dust for up to 150 ms before it lands and re-sharpens. Only heavy hits carry a faint
+haze, and under Reduce flashing at most three of those a second. The plate also shakes harder on
+each hit, so between hops the sand keeps moving with the beat without getting any brighter. Music
+with no drums gets small hops on its note attacks. Hats add a fine fizz, bass and stereo balance
+tilt the plate slightly, and silence freezes the last figure where it lies. Renderer: `webgl2`.
 
 ### Parameters
 
@@ -54,7 +55,7 @@ figure where it lies. Renderer: `webgl2`.
 | `grains` | Grains | 64k | 32k / 64k / 128k | Grain count; changing it reseeds the plate. Battery quality uses 32k while this is at its default |
 | `complexity` | Complexity | 1 | 0.5–2 | Scales how far up the mode table a note reaches (finer figures) |
 | `reactivity` | Reactivity | 1 | 0–2 | Plate drive (pull into the node lines, shake off the antinodes) and stereo tilt |
-| `hop` | Hop | 1 | 0–2 | Height of the kick hop and the lateral scatter; 0 turns hops off |
+| `hop` | Hop | 1 | 0–2 | Size of the beat hops (height and scatter); 0 turns hops off |
 
 ### How it works
 
@@ -70,18 +71,28 @@ figure where it lies. Renderer: `webgl2`.
   0.2 s of summed `dt` (an onset switches at once, so plucked notes change the figure on their
   attack); silence and atonal input hold the figure. It starts on index 6, so drums alone still
   draw a figure. The bin window is rebuilt only when the sample rate changes.
-- **Kicks** (`kick.js`): an onset whose `bass` reaches 1.6× its pre-onset level within 50 ms,
-  with `treb` rising at most 2× as much as the bass (levels floored at 0.15). The host's `onset`
-  fires on any transient; this keeps the kicks. A kick under a loud hat (the treble rising more
-  than twice as much as the bass) is skipped, the price of rejecting snares with a low body. Hops
-  are at least 0.4 s apart (`createHop`); the haze rises to 0.5·(0.4 + 0.6·strength) and decays
-  with τ 0.15 s, with strength taken on the onset frame.
-- **Audio mapping** (`sand.js` `createPlateDrive`, `createHop`): drive = clamp(0.5·min(midAtt, 2)
-  + 4·rms, 0, 2.5)·reactivity (τ 0.1 s, 0 within 0.3 s of silence); fizz = clamp(trebAtt − 1, 0,
-  2)·0.5 + flux·0.5; bass tilt 0.15·clamp(bassAtt − 1, −1, 1) (τ 0.3 s); stereo tilt
-  0.6·balance·reactivity (τ 0.5 s, `stereo.js`, exactly 0 for mono or bit-identical L/R, as with
-  the app's synthetic sources); hop vz0 = g·0.075·hop·(0.4 + 0.6·strength), a 0.15 s flight at
-  full strength, with hashed lateral scatter 0.25·strength·hop.
+- **Beat hits** (`hits.js`): per new analysis frame (`frameIndex` changed), the levels in dB of
+  three bands of the spectrum: low 23–141 Hz (kick, 808), mid 1–5 kHz (snare, clap, stomp) and
+  high 6–15 kHz (hats). A band's flux is its rise over the lowest level of the last 35 ms, judged
+  as a robust z score against its own last 2 s: (flux − median)/(1.4826·MAD + 0.5). A hit is a low
+  rise (z ≥ 3, ≥ 3 dB) of 6 dB or more, or with a host onset at most 30 ms old; or a mid rise
+  (z ≥ 3, ≥ 3 dB); or a host onset of strength ≥ 0.6; the last two not on a hat-like spectrum
+  (mid more than 3 dB under high). Hits are at least 0.1 s apart. The weight is the low level
+  mapped from −28..−10 dB to 0–1, and may grow for 43 ms (one FFT window) while the kick's low
+  end fills the window. The spectrum is auto-gained by the host, so the weight ranks hits within a
+  song and songs against each other: replayed on five real songs, 85–98% of reference kicks and
+  73–97% of beat hits hop, and the weight follows the reference bass weight (Spearman 0.58–0.82).
+- **Hops** (`sand.js` `createHop`): a hit of weight w launches 0.3 + 0.7·w of the grounded grains
+  with vz0 = g·0.075·hop·(0.4 + 0.6·w) (a 0.15 s flight at w = 1) and hashed lateral scatter
+  0.12·hop·w²; a grow re-sends the bigger hop under the same sequence number, so only the extra
+  grains launch. Hits over w = 0.7 raise the haze to 0.25·(w − 0.7)/0.3, held through the 43 ms
+  window, then decaying with τ 0.15 s.
+- **Audio mapping** (`sand.js` `createPlateDrive`): drive = base·(1 + pulse), at most
+  3·reactivity, where base = clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5)·reactivity (τ 0.1 s, 0
+  within 0.3 s of silence) and pulse jumps to 0.4 + 0.6·w on each hit and decays with τ 0.12 s;
+  fizz = clamp(trebAtt − 1, 0, 2)·0.5 + flux·0.5; bass tilt 0.15·clamp(bassAtt − 1, −1, 1)
+  (τ 0.3 s); stereo tilt 0.6·balance·reactivity (τ 0.5 s, `stereo.js`, exactly 0 for mono or
+  bit-identical L/R, as with the app's synthetic sources).
 - **Grains** (`shaders/chladni/update.vert`): 24 bytes each, (x, y, vx, vy) + (z, vz), in two
   buffers ping-ponged with transform feedback (interleaved, rasterizer discard). Fixed 1/120 s
   steps (`fixedstep.js`, at most 4 per frame), one `drawArrays(POINTS)` each. Grounded grains:
@@ -103,19 +114,25 @@ figure where it lies. Renderer: `webgl2`.
 
 ### Accessibility
 
-- **Reduce flashing** (on by default): hops are at most 2.5 per second by design (0.4 s gap),
-  with Reduce flashing on or off. The haze envelope still goes through the photosensitivity
-  limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second) as a
-  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts. Measured on
-  harness renders, a hop's first frame changes the mean luma by at most about 7 of 255 levels on
-  the brass plate (darker) and about 5 on slate with Backdrop none (brighter).
+- **Reduce flashing** (on by default): the haze, the only brightness change bigger than about a
+  level, goes through the photosensitivity limiter (`lib/flash.js`, a copy of the built-in one,
+  at most 3 rises per second). A heavy hit it refuses still hops, at weight 0.7 and with no haze,
+  so it reads as motion rather than a flash; with Reduce flashing off nothing is downgraded. The
+  drive pulse moves the sand without changing its brightness. Figure changes are always
+  crossfades of 0.4 s or longer, never cuts. Measured on harness renders on slate with Backdrop
+  none: a hop's first frame changes the mean luma by at most 2.7 of 255 levels on five real
+  songs and 1.6 on the drums source, and at most 5.6 on the music source, whose high notes give
+  fine figures where airborne dust lifts the brightness more (up to 7 levels at the peak of a
+  heavy hop).
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
-  reactivity 0.5, hops at half height and the bass tilt is off.
+  reactivity 0.5, hops at half height, the drive pulse and the bass tilt are off.
 
 ### Performance
 
 Per frame: the pitch scan (~80 bins), 1–4 transform-feedback steps over 64k grains, one POINTS
-pass at half resolution and one full-resolution composite with 7 texture taps. `frame()` allocates
+pass at half resolution and one full-resolution composite with 7 texture taps. Per new analysis
+frame (about 94 a second), the hit detector sums three spectrum bands (~600 bins) and sorts two
+256-entry history buffers twice each for their median and MAD. `frame()` allocates
 nothing: uniforms come from preallocated `Float32Array`s (mode entries via `uniform4fv` with a
 source offset), and every lib returns reused objects. `dispose()` deletes 2 buffers, 2 transform
 feedback objects, 3 VAOs, 3 programs and the density texture and framebuffer.
@@ -811,8 +828,8 @@ General-purpose helpers, one copy each:
 - `color.js`: `#rrggbb` param parsing with a fallback.
 - `meter.js`: a beat counter on the host's `beatPhase` that ignores tempo-tracker jitter
   (Plotter's phrases, Misregister's re-layouts).
-- `kick.js`: kicks out of the host's generic onsets, by a bass rise that the treble doesn't
-  outrun (Chladni's hops).
+- `hits.js`: beat hits (kicks, snares, claps, stomps) and their bass weight from the spectrum,
+  by adaptive band flux (Chladni's hops and plate pulse).
 - `beatclock.js`: a continuous clock in beats that runs free at 1 beat/s without a tempo
   (Murmuration's sweep, and the beat counts of Soapfilm, Miura, Isobar and Kelir).
 - `hash.js`: a deterministic hash of an integer to [0, 1), so runs never need `Math.random`.

@@ -4,7 +4,7 @@
     {
       "id": "chladni",
       "name": "Chladni",
-      "description": "Sand on a ringing brass plate gathers into the standing-wave figure of each note, hops on kicks and fizzes on hats.",
+      "description": "Sand on a ringing brass plate gathers into the standing-wave figure of each note, hops on every beat, harder on heavy bass, and fizzes on hats.",
       "author": "Fieldwork",
       "entry": "src/chladni.js",
       "renderer": "webgl2",
