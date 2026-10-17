@@ -18,11 +18,14 @@ rain thickens with the hats, and the whole chart drifts east on the song's beat 
 the drift stops and the systems fill, leaving a calm chart of wide, gentle isobars.
 Renderer: `2d`.
 
+The default paper chart is a steady, bright off-white field; in a dark room pick **night** (or
+**broadcast**), or **none** to show the shell's background through it.
+
 ### Parameters
 
 | id | Label | Default | Range | Effect |
 | --- | --- | --- | --- | --- |
-| `chart` | Chart | paper | paper / broadcast / night / none | Printed chart; evening-news map (navy sea, green land, white isobars, glyphs at 1.5×); night (cyan isobars, amber fronts and letters); none (transparent canvas, coastline only at 50%, light-ink isobars) |
+| `chart` | Chart | paper | paper / broadcast / night / none | Printed chart; evening-news map (navy sea, green land, white isobars, glyphs at 1.5×); night (cyan isobars, amber fronts and letters); none (transparent canvas, coastline only at 50%, light-ink isobars, coast and barbs over a thin dark halo so they read on a light desktop too) |
 | `reactivity` | Reactivity | 1 | 0–2 | Bass depth of the youngest low, kick pulse and how much the mids swell the highs |
 | `speed` | Speed | 1 | 0.2–2 | Eastward drift, in grid cells per beat |
 | `fronts` | Fronts | on | | Fronts, their glyphs, the rain and the warm-sector tint |
@@ -47,8 +50,10 @@ window shows bold rings, coloured fronts and the letters.
   bassAtt lags a kick), at least 8 beats after the last, when fewer than 4 are alive. One also
   spawns when no low has lived for 4 beats. A low spawns in the western 5–40% of the chart around
   the storm track, latitude 0.5 − 0.25·balance ± 0.2 (stereo balance smoothed over 1 s: a louder
-  left channel pushes the track north; mono stays centred). Of 4 hashed spots it takes the one
-  farthest from the live lows, so lows don't stack. The youngest low takes the bass,
+  left channel pushes the track north; mono stays centred). Of 8 hashed spots it takes the one
+  farthest from the live lows, and only if that one is at least 0.4 (about 1.8σ of a full-grown
+  low) from all of them; otherwise the spawn is skipped. Lows drift in step, so the spacing holds
+  for life and steady kicks keep 2–3 lows, not a pile of 4. The youngest low takes the bass,
   −clamp(bassAtt − 1, 0, 1.5)·28·reactivity hPa (attack 60 ms, release 0.8 s), plus a
   −6·onsetStrength hPa kick pulse that decays over 250 ms. The highs (σ 0.3, one per third of the
   width) swell to 4 + 6·midAtt (smoothed over 0.3 s) hPa. They give way over about a second when
@@ -56,6 +61,18 @@ window shows bold rings, coloured fronts and the letters.
   height) per beat, highs half that; highs leave east and re-enter from the west with a 4-beat
   fade. While silent the beat clock stops and every system fills toward the calm chart with a
   6 s time constant.
+- **Anchors** (`anchors.js`): the calm chart's slope and the neighbours pull every minimum off
+  its Gaussian centre, and a low on another's slope may have no minimum of its own (its rings
+  merge into the other's). So each frame, from every system's centre, up to 24 damped Newton
+  steps on the analytic gradient and Hessian (`derivs` in `pressure.js`; a capped gradient step
+  where the Hessian is not definite the right way, every step backtracked until P falls for a low
+  or rises for a high) find the extremum it drains into, converged below 0.5 hPa per chart unit.
+  Systems of a kind that reach the same extremum share it with one lead: last frame's lead if it
+  is still there, else the strongest. A system that leads its own extremum draws its letter,
+  central pressure and fronts there. One that loses it (a kick on a deep young neighbour can
+  swallow it for a few frames) keeps its marks at the remembered offset from its centre for 1 s,
+  then fades them over 0.4 s; marks fade in over 0.25 s. A system that never had its own extremum
+  shows nothing, so one ring system gets one letter and one set of fronts.
 - **Isobars** (`contour.js`): P is evaluated on a grid of cell = max(12 px, W/160) (at most
   160 × 90 nodes), each system as a separable product over its box. Marching squares then run
   over each cell's levels 940 + 4k between its lowest and highest corner, with linear edge
@@ -63,11 +80,11 @@ window shows bold rings, coloured fronts and the letters.
   average. All normal segments go in one path and one stroke, the bold ones in a second. Grid-edge
   crossings become the boxed numerals, at least 40 css px apart along each edge (a box that would
   overlap another, at a corner, is skipped).
-- **Fronts** (`fronts.js`): for every low older than 2 beats, R = 2.2σ. The cold front is a
-  quadratic Bézier from the centre with its control at R along angle ac and its end at 2R, 25°
+- **Fronts** (`fronts.js`): for every shown low older than 2 beats, R = 2.2σ times the anchor's
+  visibility. The cold front is a quadratic Bézier from the anchor with its control at R along angle ac and its end at 2R, 25°
   further round. ac starts at 110° (screen angles, 90° = south) and sweeps toward 60° by 50/32°
   per beat. The warm front leaves at 20° and bends 15° south. Between 16 and 32 beats an occluded
-  front grows from the centre along their bisector to 0.6R (retreating over 28–32), and both
+  front grows from the anchor along their bisector to 0.6R (retreating over 28–32), and both
   fronts start from its end. The fronts grow in over beats 2–6 and shrink away while the low
   fills. Glyphs sit every 22 css px on the leading side: cold triangles (9 px base, 8 px high)
   toward the warm sector, warm semicircles (5 px) away from it, alternating on the occluded front.
@@ -87,11 +104,15 @@ window shows bold rings, coloured fronts and the letters.
   the north-west, land where it reaches 0.58, sampled in chart space so the continent is the same
   at every size. The land is an `ImageData` mask at a quarter resolution drawn smoothed, and the
   coastline is marching squares over the same samples. Both go with the background and the dashed
-  graticule into a cached base canvas, rebuilt only on resize and when Chart or Coastline change.
+  graticule into a cached base canvas (a detached DOM canvas; an `OffscreenCanvas` only where
+  there is no document), rebuilt when Chart or Coastline change and after a resize once the size
+  has held for 0.15 s; during a resize drag the stale base is drawn scaled.
 - **Each frame**: the base, the warm sectors, rain, normal then bold isobars, front lines then
   glyphs, barbs, edge labels (boxes in one fill and one stroke, then numerals), and finally H and
-  L with their central pressures (only where the centre is at least 3 hPa off the calm chart, and
-  of two same-kind letters within two letter heights only the stronger).
+  L with their central pressures, at the anchors and at the anchors' visibility as alpha (only
+  where the extremum is at least 3 hPa off the calm chart, and of two same-kind letters within two
+  letter heights only the stronger). On the none chart the isobars, barbs and coast are each
+  stroked first 3 px wider in rgba(0, 0, 0, 0.35).
 
 `frame()` allocates nothing: all geometry goes into typed arrays made in create or resize. The
 121 numeral strings (940–1060), the letters and the fonts are built in create or resize, and label
@@ -114,13 +135,16 @@ deterministic.
 
 CPU only. Pressure, contours, fronts, rain and barbs take about 0.5 ms per frame at 2560 × 1440
 in Node on one E-core of a desktop CPU, and a whole `frame()` against a no-op context takes about
-0.4 ms (median). Canvas work is one full `drawImage` plus about 15 path fills and strokes holding
-a few thousand path operations. Building the base canvas (the coast mask) takes about 45 ms, on
-resize and chart changes only.
+0.4 ms (median); the anchors add about 0.01 ms (0.03 ms at the 99th percentile) with steady
+kicks. Canvas work is one full `drawImage` plus about 15 path fills and strokes holding a few
+thousand path operations. Building the base canvas (the coast mask) takes about 45 ms, on chart
+changes and once per resize (after the size holds). Real canvas time, the full-size base blit in
+WebKit in particular, has not been measured yet.
 
 ### Tests
 
-`cd web && npx vitest run --maxWorkers=2 ../plugins/fieldwork` (lifecycle, spawn rules, silence,
-60 vs 120 Hz, stereo storm track, field and gradient, closed rings and saddles, fronts and glyph
-sides, barb buckets and the westerly feather side, coast, params, draw order and the per-frame
-allocation check) and `uv run pytest tests/test_builtin_manifests.py` (manifest, d.ts copy).
+`cd web && npx vitest run --maxWorkers=2 ../plugins/fieldwork` (lifecycle, spawn rules and
+spacing, silence, 60 vs 120 Hz, stereo storm track, field, gradient and Hessian, anchors on real
+extrema with shared-minimum leads, hold and fade, closed rings and saddles, fronts and glyph
+sides, barb buckets and the westerly feather side, coast, params, draw order, the none chart's
+halo, resize debounce, helper copy digests and the per-frame allocation check) and `uv run pytest tests/test_builtin_manifests.py` (manifest, d.ts copy).

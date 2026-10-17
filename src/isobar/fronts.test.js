@@ -16,6 +16,7 @@ import {
   placeRain,
   WARM,
 } from "./fronts.js";
+import { createAnchors } from "./anchors.js";
 import { createPressure, MAX_LOWS } from "./pressure.js";
 
 const H = 1440;
@@ -32,13 +33,33 @@ function oneLow(age) {
   return st;
 }
 
+/**
+ * Anchors on each live low's own centre, each leading its minimum.
+ * @param {ReturnType<typeof createPressure>} st
+ */
+function centred(st) {
+  const an = createAnchors();
+  for (let i = 0; i < MAX_LOWS; i++) {
+    an.x[i] = st.x[i];
+    an.y[i] = st.y[i];
+    an.ok[i] = an.lead[i] = st.alive[i];
+    an.vis[i] = st.alive[i];
+  }
+  return an;
+}
+
+/** buildFronts with centred anchors. @param {ReturnType<typeof createPressure>} st @param {ReturnType<typeof createFronts>} f @param {number} sweep */
+function build(st, f, sweep) {
+  buildFronts(st, centred(st), f, H, sweep);
+}
+
 /** Index of slot/curve in the curve tables. @param {number} slot @param {number} kind */
 const ci = (slot, kind) => slot * 3 + kind;
 
 describe("buildFronts", () => {
   it("draws no fronts for lows younger than 2 beats", () => {
     const f = createFronts();
-    buildFronts(oneLow(1.5), f, H, 1);
+    build(oneLow(1.5), f, 1);
     for (let k = 0; k < MAX_LOWS * 3; k++) expect(f.active[k]).toBe(0);
   });
 
@@ -50,13 +71,13 @@ describe("buildFronts", () => {
       [26, 1],
       [40, 0],
     ])) {
-      buildFronts(oneLow(age), f, H, 1);
+      build(oneLow(age), f, 1);
       expect(f.active[ci(0, OCCLUDED)], `age ${age}`).toBe(occ);
       expect(f.active[ci(0, COLD)]).toBe(1);
       expect(f.active[ci(0, WARM)]).toBe(1);
     }
     // occluded: the cold and warm fronts start at the occlusion's end, not at the centre
-    buildFronts(oneLow(22), f, H, 1);
+    build(oneLow(22), f, 1);
     const o = ci(0, OCCLUDED) * FRONT_PTS * 2;
     const end = [f.pts[o + 2 * (FRONT_PTS - 1)], f.pts[o + 2 * (FRONT_PTS - 1) + 1]];
     const c = ci(0, COLD) * FRONT_PTS * 2;
@@ -64,11 +85,40 @@ describe("buildFronts", () => {
     expect(Math.hypot(end[0] - 0.8 * H, end[1] - 0.4 * H)).toBeGreaterThan(0.3 * 2.2 * 0.18 * H);
   });
 
+  it("starts the fronts and the warm sector at the anchor (the field minimum), not the Gaussian centre", () => {
+    const f = createFronts();
+    const st = oneLow(10);
+    const an = centred(st);
+    an.x[0] = 0.85;
+    an.y[0] = 0.38;
+    buildFronts(st, an, f, H, 1);
+    for (const kind of [COLD, WARM]) {
+      const o = ci(0, kind) * FRONT_PTS * 2;
+      expect(f.pts[o]).toBeCloseTo(0.85 * H, 3);
+      expect(f.pts[o + 1]).toBeCloseTo(0.38 * H, 3);
+    }
+    expect([f.centre[0], f.centre[1]]).toEqual([Math.fround(0.85 * H), Math.fround(0.38 * H)]);
+  });
+
+  it("scales the fronts with the anchor's visibility and drops them at 0", () => {
+    const f = createFronts();
+    const st = oneLow(10);
+    const an = centred(st);
+    buildFronts(st, an, f, H, 1);
+    const full = curveLength(f, ci(0, COLD));
+    an.vis[0] = 0.5;
+    buildFronts(st, an, f, H, 1);
+    expect(curveLength(f, ci(0, COLD))).toBeCloseTo(full / 2, 0);
+    an.vis[0] = 0;
+    buildFronts(st, an, f, H, 1);
+    for (let k = 0; k < MAX_LOWS * 3; k++) expect(f.active[k]).toBe(0);
+  });
+
   it("the cold front swings from south-south-west toward south-south-east as the low ages", () => {
     const f = createFronts();
     /** Screen angle (deg, y down) from the centre to the cold front's end. @param {number} age */
     const coldEnd = (age, sweep = 1) => {
-      buildFronts(oneLow(age), f, H, sweep);
+      build(oneLow(age), f, sweep);
       const c = ci(0, COLD) * FRONT_PTS * 2 + 2 * (FRONT_PTS - 1);
       return (Math.atan2(f.pts[c + 1] - 0.4 * H, f.pts[c] - 0.8 * H) * 180) / Math.PI;
     };
@@ -82,7 +132,7 @@ describe("glyphs", () => {
   it("places about one glyph per 22 px of front, on the leading side", () => {
     const f = createFronts();
     const st = oneLow(10);
-    buildFronts(st, f, H, 1);
+    build(st, f, 1);
     placeGlyphs(f, 1);
     const coldLen = curveLength(f, ci(0, COLD));
     const warmLen = curveLength(f, ci(0, WARM));
@@ -115,7 +165,7 @@ describe("glyphs", () => {
 
   it("alternates triangles and semicircles on the occluded front, and scales the spacing", () => {
     const f = createFronts();
-    buildFronts(oneLow(24), f, H, 1);
+    build(oneLow(24), f, 1);
     placeGlyphs(f, 1);
     const shapes = [];
     for (let k = 0; k < f.nGlyphs; k++) if (f.glyphs[k * 5 + 4] === OCCLUDED) shapes.push(f.glyphs[k * 5 + 3]);
@@ -128,7 +178,7 @@ describe("glyphs", () => {
 
   it("fills each front kind's glyphs in one path", () => {
     const f = createFronts();
-    buildFronts(oneLow(24), f, H, 1);
+    build(oneLow(24), f, 1);
     placeGlyphs(f, 1);
     const { ctx, log } = fakeContext();
     pathGlyphs(ctx, f, COLD, 1);
@@ -143,7 +193,7 @@ describe("glyphs", () => {
 describe("rain and tint", () => {
   it("rain is stable along the front, grows with density, and lies behind the cold front", () => {
     const f = createFronts();
-    buildFronts(oneLow(10), f, H, 1);
+    build(oneLow(10), f, 1);
     placeRain(f, 0.2, 1);
     const sparse = f.nRain;
     const first = [f.rain[0], f.rain[1]];
@@ -158,7 +208,7 @@ describe("rain and tint", () => {
 
   it("paths the rain as rects and the warm sector as one polygon per low", () => {
     const f = createFronts();
-    buildFronts(oneLow(10), f, H, 1);
+    build(oneLow(10), f, 1);
     placeRain(f, 0.5, 1);
     const { ctx, log } = fakeContext();
     pathRain(ctx, f, 2);

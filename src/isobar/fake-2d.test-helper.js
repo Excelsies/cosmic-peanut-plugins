@@ -51,7 +51,8 @@ export function fakeContext() {
       log.push({ op: "measure", text });
       return { width: text.length * 10 };
     },
-    drawImage: (/** @type {unknown} */ _img, /** @type {number} */ x, /** @type {number} */ y) => log.push({ op: "image", x, y }),
+    drawImage: (/** @type {unknown} */ _img, /** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ w, /** @type {number} */ h) =>
+      log.push({ op: "image", x, y, w, h }),
     setLineDash: (/** @type {number[]} */ d) => log.push({ op: "dash", w: d.length }),
     font: "10px sans-serif",
     textAlign: "start",

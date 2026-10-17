@@ -12,8 +12,10 @@ import {
   HIGH,
   LOW,
   lifecycleAmp,
+  MAX_LOWS,
   pressureAt,
   SLOTS,
+  SPAWN_SEP,
   stepPressure,
   youngestLow,
 } from "./pressure.js";
@@ -107,6 +109,7 @@ describe("stepPressure", () => {
   it("spawns on a bass-led strong onset, at least 8 beats apart, at most 4 at a time", () => {
     const st = createPressure(16 / 9);
     run(st, 1 / 60, 60); // first low
+    st.x[lows(st)[0]] = 1.5; // well east, so the spawn spacing doesn't hold the next one back
     const kick = (/** @type {number} */ t, /** @type {any} */ a) => {
       // a strong bass-led kick on every beat
       if (Math.abs(t * 2 - Math.round(t * 2)) < 1e-6) {
@@ -121,13 +124,14 @@ describe("stepPressure", () => {
     run(st, 0.6, 60, kick, 3.5 + 1 / 60); // past 8 beats
     expect(lows(st)).toHaveLength(2);
     run(st, 40, 60, kick, 4.1 + 1 / 60);
-    expect(lows(st).length).toBeLessThanOrEqual(4);
-    expect(lows(st).length).toBeGreaterThanOrEqual(3);
+    expect(lows(st).length).toBeLessThanOrEqual(MAX_LOWS);
+    expect(lows(st).length).toBeGreaterThanOrEqual(2);
   });
 
   it("counts an onset whose instantaneous bass leads as bass-led even while bassAtt lags", () => {
     const st = createPressure(16 / 9);
     run(st, 1 / 60, 60);
+    st.x[lows(st)[0]] = 1.5;
     run(
       st,
       4.5,
@@ -155,12 +159,42 @@ describe("stepPressure", () => {
       }
       a.bassAtt = a.bass = 1.6;
     };
-    run(st, 12.5, 60, kick, 1 / 60); // spawns at 4, 8 and 12 s
-    const l = lows(st);
-    expect(l).toHaveLength(4);
-    for (const a of l) {
-      for (const b of l) if (a !== b) expect(Math.hypot(st.x[a] - st.x[b], st.y[a] - st.y[b])).toBeGreaterThan(0.08);
+    // 90 s of steady kicks: every pair of live lows stays at least SPAWN_SEP apart (they drift in
+    // step, so the spawn spacing holds), and the usual count is 2-3, not the cap
+    let t = 1 / 60;
+    let crowded = 0;
+    let checks = 0;
+    for (let k = 0; k < 90; k++) {
+      run(st, 1, 60, kick, t);
+      t += 1;
+      const l = lows(st);
+      checks++;
+      if (l.length >= MAX_LOWS) crowded++;
+      for (const a of l) {
+        for (const b of l) {
+          if (a !== b) expect(Math.hypot(st.x[a] - st.x[b], st.y[a] - st.y[b]), `t=${t}`).toBeGreaterThan(SPAWN_SEP - 1e-9);
+        }
+      }
     }
+    expect(crowded / checks).toBeLessThan(0.25);
+  });
+
+  it("skips a spawn when no candidate spot is SPAWN_SEP clear of the live lows", () => {
+    // a portrait chart: the whole spawn area lies within SPAWN_SEP of a low in its middle
+    const st = createPressure(0.5);
+    run(st, 1 / 60, 60);
+    const [i] = lows(st);
+    st.x[i] = 0.11;
+    st.y[i] = 0.5;
+    const kick = (/** @type {number} */ t, /** @type {any} */ a) => {
+      if (Math.abs(t * 2 - Math.round(t * 2)) < 1e-6) {
+        a.onset = true;
+        a.onsetStrength = 0.9;
+      }
+      a.bassAtt = a.bass = 1.6;
+    };
+    run(st, 5, 60, kick, 1 / 60); // 10 beats: past the spawn gap, but the low has drifted only 0.11
+    expect(lows(st)).toHaveLength(1);
   });
 
   it("does not spawn on mid-led or weak onsets", () => {
@@ -258,18 +292,23 @@ describe("stepPressure", () => {
     };
     const a = createPressure(16 / 9);
     const b = createPressure(16 / 9);
-    run(a, 30, 60, stream);
-    run(b, 30, 120, stream);
+    // 35 s: clear of a spawn frame (this stream spawns at 30 s), where one frame of envelope
+    // differs by construction
+    run(a, 35, 60, stream);
+    run(b, 35, 120, stream);
     expect(a.beats).toBeCloseTo(b.beats, 4);
     for (let i = 0; i < SLOTS; i++) {
       expect(a.alive[i]).toBe(b.alive[i]);
       for (const k of /** @type {const} */ (["x", "y", "ageBeats"])) {
         expect(a[k][i], `${k}[${i}]`).toBeCloseTo(b[k][i], 3);
       }
-      // A frame's input holds over the frame before it, so smooth inputs agree to a few thousandths.
-      for (const k of /** @type {const} */ (["amp", "extra", "kick"])) {
+      // A frame's input holds over the frame before it, so smooth inputs agree to a few thousandths;
+      // the youngest low's bass depth chases a moving target (up to ~15 hPa/s here) with an
+      // attack/release switch, where that half-frame hold is worth a few hundredths of its ~20 hPa.
+      for (const k of /** @type {const} */ (["amp", "kick"])) {
         expect(a[k][i], `${k}[${i}]`).toBeCloseTo(b[k][i], 2);
       }
+      expect(Math.abs(a.extra[i] - b.extra[i]), `extra[${i}]`).toBeLessThan(0.25);
     }
   });
 

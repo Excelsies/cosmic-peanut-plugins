@@ -7,13 +7,17 @@
 /**
  * @typedef {{
  *   bg: string | null, grat: string, land: string | null, coast: string, coastAlpha: number,
- *   iso: string, label: string, box: string, halo: string, low: string, high: string,
+ *   iso: string, label: string, box: string, halo: string, halo2: string | null, low: string, high: string,
  *   fronts: readonly [string, string, string], barb: string, rain: string, tint: string,
  *   glyph: number,
  * }} ChartStyle
  */
 
-/** @type {readonly ChartStyle[]} */
+/**
+ * `halo` is the letters' outline; `halo2`, when set, is a dark under-stroke 3 px wider than the
+ * isobars, barbs and coast, for light ink that must also read on a light desktop.
+ * @type {readonly ChartStyle[]}
+ */
 export const CHART_STYLES = [
   {
     // paper: a printed surface analysis
@@ -26,6 +30,7 @@ export const CHART_STYLES = [
     label: "#1b1b1b",
     box: "#fbfbf7",
     halo: "rgba(251, 251, 247, 0.85)",
+    halo2: null,
     low: "#b3202a",
     high: "#1f3a8a",
     fronts: ["#7a2bb0", "#1d4fd6", "#d6261d"],
@@ -45,6 +50,7 @@ export const CHART_STYLES = [
     label: "#ffffff",
     box: "#10264d",
     halo: "rgba(16, 38, 77, 0.85)",
+    halo2: null,
     low: "#ff5a52",
     high: "#7fb2ff",
     fronts: ["#d08cff", "#4f8dff", "#ff4b3e"],
@@ -64,6 +70,7 @@ export const CHART_STYLES = [
     label: "#6fd3e6",
     box: "#11161c",
     halo: "rgba(17, 22, 28, 0.85)",
+    halo2: null,
     low: "#f2b33d",
     high: "#f2b33d",
     fronts: ["#f2b33d", "#f2b33d", "#f2b33d"],
@@ -83,6 +90,7 @@ export const CHART_STYLES = [
     label: "#e8e8e8",
     box: "rgba(17, 22, 28, 0.6)",
     halo: "rgba(17, 22, 28, 0.6)",
+    halo2: "rgba(0, 0, 0, 0.35)",
     low: "#ff5a52",
     high: "#7fb2ff",
     fronts: ["#d08cff", "#4f8dff", "#ff4b3e"],

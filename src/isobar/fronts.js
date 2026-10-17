@@ -2,11 +2,13 @@
 /**
  * Isobar's weather fronts, in device pixels, into preallocated buffers.
  *
- * Every low older than 2 beats carries a cold front (a quadratic Bezier trailing south-south-west
+ * Every shown low older than 2 beats carries a cold front (a quadratic Bezier trailing south-south-west
  * that swings toward south-south-east as the low ages) and a warm front (east-south-east, bending
  * south). Between 16 and 32 beats an occluded front grows from the centre along their bisector
  * and both fronts start from its end. The fronts grow in over 2-6 beats and shrink away while the
- * low fills (32-48).
+ * low fills (32-48). The fronts start from the low's anchor (anchors.js: the field's real minimum,
+ * one set per ring system) and scale with its visibility, so a low whose minimum is swallowed by a
+ * neighbour shrinks its fronts away instead of drawing them from a slope.
  *
  * Glyphs sit on each front's leading side, every 22 css px: triangles on the cold front (toward
  * the warm sector), semicircles on the warm front (away from it), alternating on the occluded one,
@@ -68,20 +70,21 @@ function bezier(f, c, x0, y0, x1, y1, x2, y2) {
 /**
  * Lays out the fronts of every live low older than 2 beats.
  * @param {import('./pressure.js').Pressure} st
+ * @param {import('./anchors.js').Anchors} an
  * @param {Fronts} f
  * @param {number} scale device px per chart unit (the canvas height)
  * @param {number} sweepEff front-sweep multiplier (0.5 under Reduce motion)
  */
-export function buildFronts(st, f, scale, sweepEff) {
+export function buildFronts(st, an, f, scale, sweepEff) {
   f.active.fill(0);
   for (let i = 0; i < MAX_LOWS; i++) {
     const age = st.ageBeats[i];
-    if (!st.alive[i] || age <= 2) continue;
-    const cx = st.x[i] * scale;
-    const cy = st.y[i] * scale;
+    if (!st.alive[i] || age <= 2 || an.vis[i] <= 0) continue;
+    const cx = an.x[i] * scale;
+    const cy = an.y[i] * scale;
     f.centre[2 * i] = cx;
     f.centre[2 * i + 1] = cy;
-    const R = 2.2 * st.sigma[i] * scale;
+    const R = 2.2 * st.sigma[i] * scale * an.vis[i];
     const grow = smooth((age - 2) / 4) * (1 - smooth((age - 32) / (LOW_LIFE - 32)));
     const ac = Math.max(60, 110 - (50 / 32) * (age - 2) * sweepEff) * DEG;
     const aw = 20 * DEG;

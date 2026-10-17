@@ -8,12 +8,14 @@
  * occludes and fills, its fronts sweeping round as it ages (isobar/fronts.js). The isobars are
  * marching squares over a grid of at most 160 x 90 nodes (isobar/contour.js); station barbs show
  * the geostrophic wind (isobar/barbs.js); the land is fractal noise (isobar/coast.js), drawn once
- * into a cached base canvas with the background and graticule.
+ * into a cached base canvas with the background and graticule. Letters, central pressures and
+ * fronts sit on the field's real extrema (isobar/anchors.js), one set per ring system.
  *
  * Kicks move lines and never flash; the only area changes (the warm-sector tint and the rain)
  * ramp over 1-2 s, and the tint also passes through the flash limiter. Every string is built in
  * create or resize, label widths are measured once in create, and frame() allocates nothing.
  */
+import { createAnchors, locateAnchors } from "./isobar/anchors.js";
 import { addBarb, clearBarbs, createBarbs, MAX_STATIONS, pathBarbs, stationGrid, windAt } from "./isobar/barbs.js";
 import { CHART_STYLES } from "./isobar/chart.js";
 import { coastSegments, createCoast, LAND, landAt } from "./isobar/coast.js";
@@ -30,16 +32,7 @@ import {
   placeRain,
 } from "./isobar/fronts.js";
 import { createParams, resolveParams } from "./isobar/isobar-params.js";
-import {
-  backgroundAt,
-  centralPressure,
-  createPressure,
-  fillField,
-  HIGH,
-  setAspect,
-  SLOTS,
-  stepPressure,
-} from "./isobar/pressure.js";
+import { createPressure, fillField, HIGH, setAspect, SLOTS, stepPressure } from "./isobar/pressure.js";
 
 const FAMILY = '"Helvetica Neue", Helvetica, Arial, "Liberation Sans", sans-serif';
 const P_MIN = 940;
@@ -52,10 +45,16 @@ const T_RAIN = 1;
 /** Below these css widths the labels and central pressures, then the barbs, are hidden. */
 const LABELS_MIN_CSS = 900;
 const BARBS_MIN_CSS = 700;
+/** During a resize drag the stale base is drawn scaled; it is rebuilt once the size holds this long (s). */
+const REBUILD_HOLD = 0.15;
 
-/** @param {number} w @param {number} h */
+/**
+ * A detached DOM canvas in the plugin's document (the same kind of surface as the visible one),
+ * or an OffscreenCanvas where there is no document.
+ * @param {number} w @param {number} h
+ */
 function makeCanvas(w, h) {
-  if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, h);
+  if (typeof document === "undefined") return new OffscreenCanvas(w, h);
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -78,6 +77,7 @@ export default async function create(ctx) {
   const barbs = createBarbs();
   const coast = createCoast();
   const flash = createFlashLimiter();
+  const anchors = createAnchors();
   const stations = new Float32Array(2 * MAX_STATIONS);
   const wind = new Float64Array(2);
   const coastSegs = new Float32Array(4 * 60000);
@@ -117,7 +117,9 @@ export default async function create(ctx) {
   const boxes = new Float32Array(5 * 256);
   /** 1 for each pressure slot that gets a letter this frame. */
   const mark = new Uint8Array(SLOTS);
-  const anomaly = new Float64Array(SLOTS);
+  /** The base is from an older size: drawn scaled until the size has held REBUILD_HOLD seconds. */
+  let baseStale = false;
+  let sinceResize = 0;
 
   const base = makeCanvas(1, 1);
   const bg = ctx2dOf(base);
@@ -150,11 +152,11 @@ export default async function create(ctx) {
     letterFont = `700 ${letterPx}px ${FAMILY}`;
     cpFont = `600 ${cpPx}px ${FAMILY}`;
     gratDash = [3 * dpr, 5 * dpr];
-    rebuildBase();
   }
 
   /** Background, graticule, land and coast into the cached base canvas. */
   function rebuildBase() {
+    baseStale = false;
     if (base.width !== W || base.height !== H) {
       base.width = W;
       base.height = H;
@@ -218,8 +220,6 @@ export default async function create(ctx) {
     }
     const n = coastSegments(values, mw, mh, sx, sy, coastSegs);
     bg.globalAlpha = style.coastAlpha;
-    bg.strokeStyle = style.coast;
-    bg.lineWidth = 1.2 * dpr;
     bg.lineCap = "round";
     bg.beginPath();
     for (let k = 0; k < n; k++) {
@@ -228,11 +228,19 @@ export default async function create(ctx) {
       bg.moveTo(coastSegs[o] + sx / 2, coastSegs[o + 1] + sy / 2);
       bg.lineTo(coastSegs[o + 2] + sx / 2, coastSegs[o + 3] + sy / 2);
     }
+    if (style.halo2) {
+      bg.strokeStyle = style.halo2;
+      bg.lineWidth = (1.2 + 3) * dpr;
+      bg.stroke();
+    }
+    bg.strokeStyle = style.coast;
+    bg.lineWidth = 1.2 * dpr;
     bg.stroke();
     bg.globalAlpha = 1;
   }
 
   layout();
+  rebuildBase();
 
   /** @param {number} p */
   const numeralIndex = (p) => Math.min(P_MAX, Math.max(P_MIN, Math.round(p))) - P_MIN;
@@ -245,6 +253,11 @@ export default async function create(ctx) {
         resolveParams(ctx.params, reduceMotion, prm);
       }
       stepPressure(pressure, audio, dt, prm);
+      locateAnchors(pressure, anchors, dt);
+      if (baseStale) {
+        sinceResize += dt;
+        if (sinceResize >= REBUILD_HOLD) rebuildBase();
+      }
 
       fluxS += (audio.flux - fluxS) * (1 - Math.exp(-dt / T_FLUX));
       centroidS += (audio.centroid - centroidS) * (1 - Math.exp(-dt / T_CENTROID));
@@ -256,14 +269,15 @@ export default async function create(ctx) {
       contour(nodes, cols, rows, cellX, cellY, 40 * dpr, contours);
       const gs = dpr * style.glyph;
       if (prm.fronts) {
-        buildFronts(pressure, fronts, H, prm.sweepEff);
+        buildFronts(pressure, anchors, fronts, H, prm.sweepEff);
         placeGlyphs(fronts, gs);
         placeRain(fronts, rainS, dpr);
       }
 
       // 1. base
       g.clearRect(0, 0, W, H);
-      g.drawImage(base, 0, 0);
+      if (base.width === W && base.height === H) g.drawImage(base, 0, 0);
+      else g.drawImage(base, 0, 0, W, H);
       g.lineCap = "round";
       g.lineJoin = "round";
 
@@ -283,16 +297,20 @@ export default async function create(ctx) {
         g.fill();
       }
 
-      // 4. isobars: all normal segments in one stroke, all bold ones in another
-      g.strokeStyle = style.iso;
-      g.lineWidth = dpr;
-      g.beginPath();
-      pathSegments(g, contours, 0);
-      g.stroke();
-      g.lineWidth = 2 * dpr;
-      g.beginPath();
-      pathSegments(g, contours, 1);
-      g.stroke();
+      // 4. isobars: all normal segments in one stroke, all bold ones in another (each over a dark
+      // halo on the light-ink 'none' chart, so they read on a light desktop too)
+      for (let bold = 0; bold < 2; bold++) {
+        g.beginPath();
+        pathSegments(g, contours, /** @type {0 | 1} */ (bold));
+        if (style.halo2) {
+          g.strokeStyle = style.halo2;
+          g.lineWidth = (bold + 1 + 3) * dpr;
+          g.stroke();
+        }
+        g.strokeStyle = style.iso;
+        g.lineWidth = (bold + 1) * dpr;
+        g.stroke();
+      }
 
       // 5. fronts, then their glyphs
       if (prm.fronts) {
@@ -320,11 +338,16 @@ export default async function create(ctx) {
           windAt(pressure, x, y, wind);
           addBarb(barbs, x * H, y * H, wind[0], wind[1], 14 * dpr);
         }
+        g.beginPath();
+        pathBarbs(g, barbs, 0);
+        if (style.halo2) {
+          g.strokeStyle = style.halo2;
+          g.lineWidth = (1.2 + 3) * dpr;
+          g.stroke();
+        }
         g.strokeStyle = style.barb;
         g.fillStyle = style.barb;
         g.lineWidth = 1.2 * dpr;
-        g.beginPath();
-        pathBarbs(g, barbs, 0);
         g.stroke();
         g.beginPath();
         pathBarbs(g, barbs, 1);
@@ -381,18 +404,18 @@ export default async function create(ctx) {
         }
       }
 
-      // 8. H and L, with their central pressure: only real systems (centre at least 3 hPa off
-      // the calm chart, the right way), and of two that would overlap only the stronger.
-      for (let i = 0; i < SLOTS; i++) {
-        anomaly[i] = pressure.alive[i] ? centralPressure(pressure, i) - backgroundAt(pressure.x[i], pressure.y[i]) : 0;
-        mark[i] = pressure.alive[i] && (pressure.kind[i] === HIGH ? anomaly[i] >= 3 : anomaly[i] <= -3) ? 1 : 0;
-      }
+      // 8. H and L, with their central pressure, on each extremum (anchors.js: one letter per
+      // ring system, only where it is at least 3 hPa off the calm chart the right way), and of two
+      // same-kind letters that would overlap only the stronger.
+      for (let i = 0; i < SLOTS; i++) mark[i] = anchors.letter[i];
       for (let i = 0; i < SLOTS; i++) {
         for (let j = 0; j < SLOTS; j++) {
           if (i === j || !mark[i] || !mark[j] || pressure.kind[i] !== pressure.kind[j]) continue;
-          const dx = (pressure.x[i] - pressure.x[j]) * H;
-          const dy = (pressure.y[i] - pressure.y[j]) * H;
-          if (dx * dx + dy * dy < 4 * letterPx * letterPx && Math.abs(anomaly[i]) < Math.abs(anomaly[j])) mark[i] = 0;
+          const dx = (anchors.x[i] - anchors.x[j]) * H;
+          const dy = (anchors.y[i] - anchors.y[j]) * H;
+          const ai = Math.abs(anchors.anomaly[i]);
+          const aj = Math.abs(anchors.anomaly[j]);
+          if (dx * dx + dy * dy < 4 * letterPx * letterPx && (ai < aj || (ai === aj && j < i))) mark[i] = 0;
         }
       }
       g.font = letterFont;
@@ -403,32 +426,39 @@ export default async function create(ctx) {
       for (let i = 0; i < SLOTS; i++) {
         const high = pressure.kind[i] === HIGH;
         if (!mark[i]) continue;
-        const x = pressure.x[i] * H;
-        const y = pressure.y[i] * H;
+        const x = anchors.x[i] * H;
+        const y = anchors.y[i] * H;
         if (x < -letterPx || x > W + letterPx) continue;
+        g.globalAlpha = anchors.vis[i];
         g.fillStyle = high ? style.high : style.low;
         g.strokeText(high ? HIGH_TEXT : LOW_TEXT, x, y);
         g.fillText(high ? HIGH_TEXT : LOW_TEXT, x, y);
       }
+      g.globalAlpha = 1;
       if (text) {
         g.font = cpFont;
         g.lineWidth = 3 * dpr;
         for (let i = 0; i < SLOTS; i++) {
           const high = pressure.kind[i] === HIGH;
-          if (!pressure.alive[i] || !mark[i]) continue;
-          const x = pressure.x[i] * H;
-          const y = pressure.y[i] * H + 0.62 * letterPx + 0.5 * cpPx;
+          if (!mark[i]) continue;
+          const x = anchors.x[i] * H;
+          const y = anchors.y[i] * H + 0.62 * letterPx + 0.5 * cpPx;
           if (x < -letterPx || x > W + letterPx) continue;
-          const s = NUMS[numeralIndex(centralPressure(pressure, i))];
+          const s = NUMS[numeralIndex(anchors.p[i])];
+          g.globalAlpha = anchors.vis[i];
           g.fillStyle = high ? style.high : style.low;
           g.strokeText(s, x, y);
           g.fillText(s, x, y);
         }
+        g.globalAlpha = 1;
       }
     },
 
     resize() {
       layout();
+      // a resize drag: draw the old base scaled, rebuild once the size holds (frame())
+      baseStale = true;
+      sinceResize = 0;
     },
 
     params(changed) {

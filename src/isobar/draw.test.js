@@ -192,6 +192,85 @@ describe("Isobar draw", () => {
     expect(bare.base.log.filter((e) => e.op === "stroke")).toHaveLength(1); // graticule only
   });
 
+  it("puts a dark halo under the light ink of the 'none' chart: isobars, barbs and coast", async () => {
+    const { viz, log, base } = await setup({ chart: "none" });
+    drive(viz, 20);
+    log.length = 0;
+    drive(viz, 1 / 60, audioFrame(), 20);
+    const strokes = log.filter((e) => e.op === "stroke");
+    const halo = "rgba(0, 0, 0, 0.35)";
+    // normal isobars: halo then ink; bold isobars: halo then ink
+    expect(strokes.slice(0, 4).map((s) => [s.style, s.width])).toEqual([
+      [halo, 2 + 6],
+      ["#e8e8e8", 2],
+      [halo, 4 + 6],
+      ["#e8e8e8", 4],
+    ]);
+    const barbInk = strokes.findIndex((s) => s.style === "#e8e8e8" && s.width === 2.4);
+    expect(strokes[barbInk - 1]).toMatchObject({ style: halo, width: 2.4 + 6 });
+    const coast = base.log.filter((e) => e.op === "stroke" && e.alpha !== 1);
+    expect(coast.map((s) => s.style)).toEqual([halo, "#e8e8e8"]);
+    // the other charts draw no halo strokes
+    const paper = await setup();
+    drive(paper.viz, 20);
+    expect(paper.log.some((e) => e.op === "stroke" && e.style === halo)).toBe(false);
+  });
+
+  it("draws no two lows' letters within two letter heights under steady kicks", async () => {
+    const { viz, log } = await setup();
+    const a = audioFrame();
+    let t = 0;
+    for (const t0 of [9, 15, 25, 40]) {
+      drive(viz, t0 - t, a, t);
+      t = t0;
+      log.length = 0;
+      drive(viz, 1 / 60, a, t);
+      t += 1 / 60;
+      const ls = log.filter((e) => e.op === "text" && e.text === "L");
+      for (let i = 0; i < ls.length; i++) {
+        for (let j = i + 1; j < ls.length; j++) {
+          const d = Math.hypot(/** @type {number} */ (ls[i].x) - /** @type {number} */ (ls[j].x), /** @type {number} */ (ls[i].y) - /** @type {number} */ (ls[j].y));
+          expect(d, `t=${t0}`).toBeGreaterThan(2 * 40 * 2);
+        }
+      }
+    }
+  });
+
+  it("during a resize drag shows the stale base scaled, and rebuilds it once the size has held", async () => {
+    const { viz, ctx, log, base } = await setup();
+    const a = drive(viz, 1);
+    const fills = () => base.log.filter((e) => e.op === "fillRect").length;
+    const n = fills();
+    const size = /** @type {any} */ (ctx.size);
+    let t = 1;
+    for (let k = 0; k < 10; k++) {
+      size.width = 2560 - 40 * (k + 1);
+      size.cssWidth = size.width / 2;
+      viz.resize?.({ width: size.width, height: size.height, cssWidth: size.cssWidth, cssHeight: size.cssHeight, dpr: 2 });
+      log.length = 0;
+      drive(viz, 2 / 60, a, t);
+      t += 2 / 60;
+      expect(fills(), `step ${k}`).toBe(n);
+      const img = log.find((e) => e.op === "image");
+      expect(img).toMatchObject({ x: 0, y: 0, w: size.width, h: size.height });
+    }
+    drive(viz, 0.3, a, t);
+    expect(fills()).toBe(n + 1);
+    expect(offscreen[0].width).toBe(2160);
+  });
+
+  it("makes the base a DOM canvas when there is a document", async () => {
+    const gd = /** @type {any} */ (globalThis);
+    const made = /** @type {FakeOffscreen[]} */ ([]);
+    gd.document = { createElement: () => made[made.push(new FakeOffscreen(0, 0)) - 1] };
+    try {
+      await setup();
+      expect(made.length).toBe(2);
+    } finally {
+      delete gd.document;
+    }
+  });
+
   it("rebuilds the base on chart changes only, and releases it on dispose", async () => {
     const { viz, ctx, base } = await setup();
     const n = base.log.length;

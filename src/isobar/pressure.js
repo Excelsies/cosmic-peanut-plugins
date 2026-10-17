@@ -42,9 +42,14 @@ const HIGH_SIGMA = 0.3;
 const SPAWN_GAP = 8; // beats between onset spawns
 const IDLE_SPAWN = 4; // beats without any low before one starts anyway
 const SPAWN_STRENGTH = 0.4;
-const SPAWN_TRIES = 4;
+const SPAWN_TRIES = 8;
 /** Latitude spread of spawns around the storm track (lows are ~0.4 wide, so they need room). */
 const SPAWN_SPREAD = 0.4;
+/**
+ * A new low starts at least this far from every live low (about 1.8 sigma of a full-grown one),
+ * or not at all. Lows drift in step, so the spacing holds for life and their rings stay apart.
+ */
+export const SPAWN_SEP = 0.4;
 const BASS_DEPTH = 28; // hPa per unit of bassAtt above 1
 const KICK_DEPTH = 6; // hPa per unit of onsetStrength
 const T_ATTACK = 0.06;
@@ -189,7 +194,8 @@ function spawnLow(st) {
   }
   if (slot < 0) return -1;
   const id = st.nextId++;
-  // Of a few hashed spots in the west, the one farthest from the live lows (so lows don't stack).
+  // Of a few hashed spots in the west, the one farthest from the live lows, if it is SPAWN_SEP
+  // clear of them all; otherwise no spawn (two lows closer than that merge into one ring set).
   let bestX = 0;
   let bestY = 0;
   let bestD = -1;
@@ -205,6 +211,10 @@ function spawnLow(st) {
       bestX = x;
       bestY = y;
     }
+  }
+  if (bestD < SPAWN_SEP * SPAWN_SEP) {
+    st.nextId--;
+    return -1;
   }
   st.alive[slot] = 1;
   st.id[slot] = id;
@@ -344,6 +354,51 @@ export function grad(st, x, y, out) {
   }
   out[0] = gx;
   out[1] = gy;
+}
+
+/**
+ * P, its gradient and its Hessian at (x, y), into out: [P, Px, Py, Pxx, Pxy, Pyy] (hPa per chart
+ * unit, screen axes). For Newton steps onto the field's extrema (anchors.js).
+ * @param {Pressure} st @param {number} x @param {number} y @param {Float64Array} out
+ */
+export function derivs(st, x, y, out) {
+  const ph = BG_K * x + BG_PHASE;
+  let p = BASE_P + BG_GRAD * (y - 0.5 + BG_WAVE * Math.sin(ph));
+  let gx = BG_GRAD * BG_WAVE * BG_K * Math.cos(ph);
+  let gy = BG_GRAD;
+  let hxx = -BG_GRAD * BG_WAVE * BG_K * BG_K * Math.sin(ph);
+  let hxy = 0;
+  let hyy = 0;
+  for (let i = 0; i < SLOTS; i++) {
+    const A = st.eff[i];
+    if (A === 0) continue;
+    const s2 = st.sigma[i] * st.sigma[i];
+    const dx = x - st.x[i];
+    const dy = y - st.y[i];
+    const inv = 1 / (2 * s2);
+    const ex = Math.exp(-dx * dx * inv);
+    const ey = Math.exp(-dy * dy * inv);
+    if (ex <= E3 || ey <= E3) continue;
+    // T(d) = (e - E3) TAPER, T' = -e d / s^2 TAPER, T'' = e (d^2 / s^4 - 1 / s^2) TAPER
+    const tx = (ex - E3) * TAPER;
+    const ty = (ey - E3) * TAPER;
+    const tx1 = -ex * (dx / s2) * TAPER;
+    const ty1 = -ey * (dy / s2) * TAPER;
+    const tx2 = ex * ((dx * dx) / (s2 * s2) - 1 / s2) * TAPER;
+    const ty2 = ey * ((dy * dy) / (s2 * s2) - 1 / s2) * TAPER;
+    p += A * tx * ty;
+    gx += A * tx1 * ty;
+    gy += A * tx * ty1;
+    hxx += A * tx2 * ty;
+    hxy += A * tx1 * ty1;
+    hyy += A * tx * ty2;
+  }
+  out[0] = p;
+  out[1] = gx;
+  out[2] = gy;
+  out[3] = hxx;
+  out[4] = hxy;
+  out[5] = hyy;
 }
 
 /** Pressure at the centre of slot i (hPa). @param {Pressure} st @param {number} i */
