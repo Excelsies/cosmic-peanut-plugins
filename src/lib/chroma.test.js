@@ -79,6 +79,30 @@ describe("createChroma", () => {
     expect(out[4]).toBeCloseTo(0.7, 1);
   });
 
+  it("takes the damping from the major third below (p + 8), so a lone C's harmonics never lift E over C", () => {
+    // C3 with harmonics 1–8 at 1/n amplitude: C C G C E G A# C. The 5th harmonic (E) should give
+    // weight back to nothing, and C must not lose weight to E; the spec's literal (p + 4) form
+    // would damp C by its own 5th harmonic instead.
+    const sr = 48000;
+    const s = new Float32Array(N);
+    for (let n = 1; n <= 8; n++) {
+      const b = (hz(48) * n * 2048) / sr;
+      for (let i = Math.floor(b) - 3; i <= Math.ceil(b) + 3; i++) {
+        const d = Math.abs(i - b);
+        if (d < 2) s[i] = Math.max(s[i], (0.8 / n) * (0.5 + 0.5 * Math.cos((Math.PI * d) / 2)));
+      }
+    }
+    const out = createChroma().update(s, sr, false);
+    expect(out[0]).toBeCloseTo(1, 6);
+    expect(out[4]).toBeLessThan(out[0]);
+    expect(out[4]).toBeLessThan(0.5);
+    // The pitch class a major third above C (E) is the one damped by C, not the one below (G#).
+    const lone = createChroma().update(spectrumOf([hz(60)], sr), sr, false);
+    expect(lone[0]).toBeCloseTo(1, 6);
+    const ce = createChroma().update(spectrumOf([hz(60), hz(64)], sr), sr, false);
+    expect(ce[0]).toBeGreaterThan(ce[4]);
+  });
+
   it("splits a note between quarter tones' two nearest pitch classes", () => {
     const c = createChroma();
     // Halfway between C and C# (no third above either has weight, so no damping applies to them).

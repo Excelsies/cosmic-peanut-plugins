@@ -23,7 +23,9 @@ const T_PEAK = Math.atan(WD / PLATE_ZETA);
 const PEAK = Math.exp((-PLATE_ZETA * T_PEAK) / WD) * Math.sin(T_PEAK) / WD;
 
 /**
- * How far a kick throws the plates, device px.
+ * How far a kick throws the plates, device px: misregister × (8 + 12 × onset strength) ×
+ * (0.6 + 0.4 × bass above average) CSS px, so a typical kick at the default 0.5 is 4–8 px and the
+ * hardest at full misregister 20 px.
  * @param {number} misregister param 0–1
  * @param {number} onsetStrength `audio.onsetStrength`
  * @param {number} bassAtt `audio.bassAtt` (1 = average)
@@ -32,7 +34,7 @@ const PEAK = Math.exp((-PLATE_ZETA * T_PEAK) / WD) * Math.sin(T_PEAK) / WD;
 export function joltMagnitude(misregister, onsetStrength, bassAtt, pxScale) {
   const s = Math.min(1, Math.max(0, onsetStrength));
   const b = Math.min(1, Math.max(0, bassAtt - 1));
-  return misregister * (2 + 8 * s) * (0.5 + 0.5 * b) * pxScale;
+  return misregister * (8 + 12 * s) * (0.6 + 0.4 * b) * pxScale;
 }
 
 /**

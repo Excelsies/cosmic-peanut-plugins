@@ -39,12 +39,23 @@ describe("plates", () => {
 
   it("scales the kick with misregister, onset strength and bass (CSS px × pxScale)", () => {
     expect(joltMagnitude(0, 1, 2, 2)).toBe(0);
-    expect(joltMagnitude(1, 0, 1, 1)).toBeCloseTo(2 * 0.5, 9);
-    expect(joltMagnitude(1, 1, 2, 1)).toBeCloseTo(10, 9);
-    expect(joltMagnitude(1, 1, 5, 1)).toBeCloseTo(10, 9);
-    expect(joltMagnitude(0.5, 0.5, 1.5, 2)).toBeCloseTo(0.5 * 6 * 0.75 * 2, 9);
+    expect(joltMagnitude(1, 0, 1, 1)).toBeCloseTo(8 * 0.6, 9);
+    expect(joltMagnitude(1, 1, 2, 1)).toBeCloseTo(20, 9);
+    expect(joltMagnitude(1, 1, 5, 1)).toBeCloseTo(20, 9);
+    expect(joltMagnitude(0.5, 0.5, 1.5, 2)).toBeCloseTo(0.5 * 14 * 0.8 * 2, 9);
     // Bigger kicks throw the plates further, proportionally.
     expect(run(60, 1, 4).peak / run(60, 1, 8).peak).toBeCloseTo(0.5, 6);
+  });
+
+  it("throws a typical kick 4–8 px at the default misregister on a dpr-1 display", () => {
+    // Host onsetStrength (odf / decaying peak) is 0.4–0.9 on real kicks; bassAtt − 1 is 0.2–0.5.
+    for (const s of [0.4, 0.65, 0.9]) {
+      for (const b of [1.2, 1.35, 1.5]) {
+        const m = joltMagnitude(0.5, s, b, 1);
+        expect(m).toBeGreaterThanOrEqual(4);
+        expect(m).toBeLessThanOrEqual(8);
+      }
+    }
   });
 
   it("pushes the plates 120° apart with ±30° deterministic jitter", () => {

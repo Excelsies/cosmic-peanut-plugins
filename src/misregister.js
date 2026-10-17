@@ -4,10 +4,11 @@
  *
  * Twelve flat, hard-edged shapes sit on a Swiss grid over cream paper, one per pitch class, each
  * printed as an AM halftone in one of three inks (plate = the pitch class's region of the circle
- * of fifths). Chords swell their notes' shapes from a grid-anchored corner and push their ink
- * ramps darker; kicks knock the three plates out of register on damped springs, so colour fringes
- * and paper slivers flash along every edge; hats make the screens shimmer; noisy passages print
- * rough; every few bars the shapes slide to a new layout.
+ * of fifths) over a light tint of a second ink (the neighbouring region). Chords swell their
+ * notes' shapes from a grid-anchored corner and push their ink ramps darker; kicks knock the
+ * three plates out of register on damped springs, so every shape's two inks slip apart and its
+ * edges fringe; hats make the screens shimmer; noisy passages print rough; every few bars the
+ * shapes slide to a new layout.
  *
  * Two passes per frame: plates.frag at half resolution writes each plate's ink density and
  * signed distance (MRT, RGBA8), halftone.frag at full resolution screens and overprints them.
@@ -30,7 +31,7 @@ import {
 } from "./lib/layout.js";
 import { cellSize, PALETTES, PAPERS, resolveParams } from "./lib/misregister-params.js";
 import { createPlates, joltMagnitude } from "./lib/plates.js";
-import { packShapes } from "./lib/poster.js";
+import { packShapes, TINT } from "./lib/poster.js";
 import { SCREEN_ANGLES, shimmerAmount, shimmerOffsets } from "./lib/screen.js";
 import { createSwell } from "./lib/swell.js";
 import { stepEnvelope } from "./lib/envelope.js";
@@ -207,6 +208,7 @@ export default async function create(ctx) {
       gl.uniform2f(pu.uFull, w, h);
       gl.uniform2f(pu.uHalf, halfW, halfH);
       gl.uniform1f(pu.uCell, cell);
+      gl.uniform1f(pu.uTint, TINT);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
 
       // Pass 2: halftone and overprint to the canvas.

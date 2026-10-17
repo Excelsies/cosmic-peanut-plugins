@@ -12,6 +12,7 @@ import {
   plateOf,
   RELAYOUT_OPTIONS,
   resolveParams,
+  tintPlateOf,
 } from "./misregister-params.js";
 
 const fresh = () => resolveParams({}, false, {
@@ -87,5 +88,29 @@ describe("plateOf", () => {
       ["B", "C#", "E", "F#"],
       ["A#", "D#", "F", "G#"],
     ]);
+  });
+});
+
+describe("tintPlateOf", () => {
+  it("tints each shape with the plate of its nearest neighbouring region on the circle of fifths", () => {
+    const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    /** @type {Record<string, number>} */
+    const tint = {};
+    for (let pc = 0; pc < 12; pc++) tint[names[pc]] = tintPlateOf(pc);
+    // Plate 0 = C G D A: C and G sit next to F (plate 2), D and A next to E (plate 1).
+    expect(tint).toEqual({
+      C: 2, G: 2, D: 1, A: 1,
+      E: 0, B: 0, "F#": 2, "C#": 2,
+      "G#": 1, "D#": 1, "A#": 0, F: 0,
+    });
+  });
+
+  it("never tints a shape with its own plate, and every plate tints four shapes", () => {
+    const count = [0, 0, 0];
+    for (let pc = 0; pc < 12; pc++) {
+      expect(tintPlateOf(pc)).not.toBe(plateOf(pc));
+      count[tintPlateOf(pc)]++;
+    }
+    expect(count).toEqual([4, 4, 4]);
   });
 });

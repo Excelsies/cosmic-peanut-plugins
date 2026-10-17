@@ -1,5 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
+import { hash01 } from "./hash.js";
 import { ATTACK, ATTACK_REDUCED, createSwell, DOT_BOOST, RELEASE, SILENT_SWELL } from "./swell.js";
 
 const DT = 1 / 60;
@@ -66,6 +67,44 @@ function stabs(reduce) {
   return out;
 }
 
+
+/** Pitch classes of a I–IV–V–vi progression in C. */
+const PROGRESSION = [[0, 4, 7], [5, 9, 0], [7, 11, 2], [9, 0, 4]];
+
+/**
+ * Chord changes every 0.5 s with flickering note weights, a little leakage and jittery frame
+ * times (60 Hz ± 30%), for 20 s. Returns the largest one-frame change in any shape's scale
+ * (0.55 + 0.45 × swell, as poster.js draws it) and the largest one-frame rise of the gain.
+ * @param {boolean} reduce
+ */
+function largestScaleStep(reduce) {
+  const s = createSwell();
+  const c = new Float32Array(12);
+  const prev = new Float32Array(12).fill(0.55);
+  let t = 0;
+  let worst = 0;
+  let gainRise = 0;
+  let gain = 1;
+  for (let f = 0; f < 20 * 60; f++) {
+    const dt = (1 + 0.6 * (hash01(f * 7 + 1) - 0.5)) / 60;
+    t += dt;
+    const k = Math.floor(t / 0.5);
+    const chord = PROGRESSION[k % 4];
+    // Real chroma flickers frame to frame: leakage and the chord's weaker notes jitter.
+    for (let i = 0; i < 12; i++) c[i] = 0.08 * hash01(f * 31 + i);
+    chord.forEach((pc, j) => { c[pc] = j === 0 ? 1 : 0.6 + 0.3 * hash01(f * 13 + j); });
+    s.step(c, false, k !== Math.floor((t - dt) / 0.5), dt, 1, reduce);
+    for (let i = 0; i < 12; i++) {
+      const scale = 0.55 + 0.45 * s.swell[i];
+      if (f > 0) worst = Math.max(worst, Math.abs(scale - prev[i]));
+      prev[i] = scale;
+    }
+    gainRise = Math.max(gainRise, s.gain - gain);
+    gain = s.gain;
+  }
+  return { worst, gainRise };
+}
+
 describe("createSwell", () => {
   it("swells a pitch class towards chroma² × reactivity with 80 ms attack and 600 ms release", () => {
     const s = createSwell();
@@ -118,6 +157,18 @@ describe("createSwell", () => {
     expect(maxPerSecond(flashStarts(off, 0.01))).toBeGreaterThan(3);
     expect(maxPerSecond(flashStarts(on, 0.01))).toBeLessThanOrEqual(3);
     expect(Math.max(...on)).toBeGreaterThan(0.1); // still reacts
+  });
+
+  it("with Reduce flashing, moves shapes no more abruptly than without it (held rises ramp in)", () => {
+    const off = largestScaleStep(false);
+    const on = largestScaleStep(true);
+    // The 150 ms attack alone (limiter bypassed) moves a shape at most 5.6% of its slot in one
+    // frame of this run; with the limiter's held rises released in one frame it was 8.1%.
+    expect(on.worst).toBeLessThan(0.065);
+    expect(on.worst).toBeLessThan(off.worst);
+    // A held rise comes back over ≥ ~150 ms, never in one frame.
+    expect(on.gainRise).toBeLessThan(0.15);
+    expect(off.gainRise).toBe(0);
   });
 
   it("allocates nothing: the same arrays every step", () => {

@@ -35,11 +35,24 @@ describe("makeGrain", () => {
     }
   });
 
-  it("has streaky fibre (R smoother along x than y), white speckle (G) and soft wobble (B)", () => {
+  it("has streaky fibre (R smoother along x than y) and an independent white speckle per plate (G, B, A)", () => {
     const g = makeGrain(3);
+    const n = GRAIN_SIZE * GRAIN_SIZE;
     expect(roughness(g, 0, true)).toBeLessThan(roughness(g, 0, false) * 0.6);
-    expect(roughness(g, 1, true)).toBeGreaterThan(40);
-    expect(roughness(g, 2, true)).toBeLessThan(8);
-    expect(g[3]).toBe(255);
+    for (const ch of [1, 2, 3]) expect(roughness(g, ch, true)).toBeGreaterThan(40);
+    /** Pearson correlation of two channels. @param {number} a @param {number} b */
+    const corr = (a, b) => {
+      let sa = 0, sb = 0, sab = 0, saa = 0, sbb = 0;
+      for (let i = 0; i < n; i++) {
+        const x = g[i * 4 + a];
+        const y = g[i * 4 + b];
+        sa += x; sb += y; sab += x * y; saa += x * x; sbb += y * y;
+      }
+      const cov = sab / n - (sa / n) * (sb / n);
+      return cov / Math.sqrt((saa / n - (sa / n) ** 2) * (sbb / n - (sb / n) ** 2));
+    };
+    expect(Math.abs(corr(1, 2))).toBeLessThan(0.03);
+    expect(Math.abs(corr(1, 3))).toBeLessThan(0.03);
+    expect(Math.abs(corr(2, 3))).toBeLessThan(0.03);
   });
 });

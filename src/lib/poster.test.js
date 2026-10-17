@@ -1,8 +1,8 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import { gridOf, placeLayout, SHAPE_OF_PC, SLOT } from "./layout.js";
-import { plateOf } from "./misregister-params.js";
-import { packShapes, RAMP_LO } from "./poster.js";
+import { plateOf, tintPlateOf } from "./misregister-params.js";
+import { packShapes, RAMP_LO, TINT } from "./poster.js";
 
 const grid = gridOf(2560, 1440, {});
 const layout = placeLayout(0, grid.cols, grid.rows, new Float32Array(12 * SLOT));
@@ -19,7 +19,7 @@ function anchorCorner(u, pc) {
   let best = Infinity;
   for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
     // Rotated rect: world half extents swap at 90°/270°.
-    const quarter = Math.round(u[o + 6] / (Math.PI / 2)) % 2 !== 0;
+    const quarter = Math.abs(u[o + 6]) > 0.5; // sin of the rotation: 90° or 270°
     const wx = quarter ? hy : hx;
     const wy = quarter ? hx : hy;
     best = Math.min(best, Math.hypot(cx + sx * wx - ax, cy + sy * wy - ay));
@@ -28,15 +28,20 @@ function anchorCorner(u, pc) {
 }
 
 describe("packShapes", () => {
-  it("packs 12 shapes × 3 vec4: centre/half size, type/plate/angle/mirror, ramp", () => {
+  it("packs 12 shapes × 3 vec4: centre/half size, type/cos/sin/mirror, ramp/dot/plates", () => {
     const u = new Float32Array(144);
     const swell = new Float32Array(12).fill(1);
     packShapes(layout, swell, new Float32Array(12), grid, u);
     for (let pc = 0; pc < 12; pc++) {
       const o = pc * 12;
       expect(u[o + 4]).toBe(SHAPE_OF_PC[pc]);
-      expect(u[o + 5]).toBe(plateOf(pc));
+      const angle = (layout[pc * SLOT + 6] * Math.PI) / 180;
+      expect(u[o + 5]).toBeCloseTo(Math.cos(angle), 6);
+      expect(u[o + 6]).toBeCloseTo(Math.sin(angle), 6);
       expect(Math.abs(u[o + 7])).toBe(1);
+      // Primary plate + 3 × tint plate, decoded in plates.frag.
+      expect(u[o + 11] % 3).toBe(plateOf(pc));
+      expect(Math.floor(u[o + 11] / 3)).toBe(tintPlateOf(pc));
       expect(u[o + 8]).toBeCloseTo(RAMP_LO, 6);
       expect(u[o + 9]).toBeCloseTo(1, 6);
       // Full swell fills the slot's cells exactly.
@@ -45,6 +50,7 @@ describe("packShapes", () => {
       expect(u[o + 2] * 2).toBeCloseTo(lw * (quarter ? grid.cellH : grid.cellW), 3);
     }
     expect(RAMP_LO).toBe(0.3);
+    expect(TINT).toBe(0.22);
   });
 
   it("swells each shape from its grid-anchored corner: 55% at rest, 100% at full swell", () => {

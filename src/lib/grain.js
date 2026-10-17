@@ -3,9 +3,9 @@
  * Misregister's paper-and-ink grain texture (built once in create, never per frame): a
  * seamlessly tiling GRAIN_SIZE² RGBA8 image from integer hashes (no Math.random), with
  *   R  paper fibre: value noise stretched 16:1 along x, plus a little fine noise
- *   G  speckle: white noise per texel (ink starvation, broken dots)
- *   B  density wobble: soft 8 × 8-cell value noise (uneven inking)
- *   A  255
+ *   G, B, A  speckle of plates 0, 1, 2: independent white noise per texel (ink starvation,
+ *            broken dots), so halftone.frag reads fibre and all three speckles in one fetch
+ * (the per-cell density wobble is an ALU value noise in halftone.frag).
  */
 import { hash01 } from "./hash.js";
 
@@ -44,9 +44,9 @@ export function makeGrain(seed) {
       const i = (y * n + x) * 4;
       const fibre = 0.75 * valueNoise(x, y, 16, 256, s + 1) + 0.25 * valueNoise(x, y, 64, 256, s + 2);
       px[i] = Math.round(fibre * 255);
-      px[i + 1] = Math.floor(hash01(s + 3 + y * n + x) * 256);
-      px[i + 2] = Math.round(valueNoise(x, y, 8, 8, s + 4) * 255);
-      px[i + 3] = 255;
+      px[i + 1] = Math.floor(hash01(s + 3 + (y * n + x) * 3) * 256);
+      px[i + 2] = Math.floor(hash01(s + 4 + (y * n + x) * 3) * 256);
+      px[i + 3] = Math.floor(hash01(s + 5 + (y * n + x) * 3) * 256);
     }
   }
   return px;

@@ -120,3 +120,17 @@ export function cellSize(height, screen) {
 export function plateOf(pc) {
   return Math.floor(((pc * 7) % 12) / 4);
 }
+
+/**
+ * Tint plate of a pitch class: every shape is also printed as a light tint (poster.js TINT) on a
+ * second plate, as riso posters do, so a kick that knocks the plates apart fringes every edge.
+ * The tint is the plate of the region nearest the pitch class on the circle of fifths: the first
+ * two fifths of a region lean back to the previous region, the last two forward to the next
+ * (C G → plate 2, D A → plate 1). Each plate tints four shapes, never its own.
+ * @param {number} pc 0–11
+ */
+export function tintPlateOf(pc) {
+  const k = (pc * 7) % 12;
+  const region = Math.floor(k / 4);
+  return k % 4 < 2 ? (region + 2) % 3 : (region + 1) % 3;
+}

@@ -1,9 +1,11 @@
 #version 300 es
 // Misregister plate pass (half resolution, two render targets).
-//   oDensity.rgb  ink density of plates 0, 1, 2: each shape's ramp, written wherever the shape's
-//                 SDF is under one screen cell (dilated, so the halftone pass finds the shape's
-//                 density at edge cells whose centre falls just outside it); max over shapes.
-//   oDist.rgb     signed distance to each plate's union of shapes, 0.5 + sdf / 16 half-res px.
+//   oDensity.rgb  ink density of plates 0, 1, 2: each shape's ramp on its plate and the flat tint
+//                 uTint on its tint plate, written wherever the shape's SDF is under one screen
+//                 cell (dilated, so the halftone pass finds the shape's density at edge cells
+//                 whose centre falls just outside it); max over shapes.
+//   oDist.rgb     signed distance to each plate's union of shapes (a shape belongs to its plate
+//                 and its tint plate), 0.5 + sdf / 16 half-res px.
 // Shapes are analytic SDFs in a y-down local frame (+y towards the canvas bottom).
 precision highp float;
 
@@ -14,6 +16,7 @@ uniform vec4 uShape[36];  // see src/lib/poster.js
 uniform vec2 uFull;       // canvas size, device px
 uniform vec2 uHalf;       // this target's size
 uniform float uCell;      // halftone cell, device px
+uniform float uTint;      // ink density of every shape's tint plate
 
 float sdBox(vec2 p, vec2 b) {
   vec2 d = abs(p) - b;
@@ -76,8 +79,8 @@ void main() {
     vec4 a = uShape[i * 3];
     vec4 b = uShape[i * 3 + 1];
     vec4 r = uShape[i * 3 + 2];
-    float cs = cos(b.z);
-    float sn = sin(b.z);
+    float cs = b.y;
+    float sn = b.z;
     vec2 d = p - a.xy;
     vec2 l = vec2(cs * d.x + sn * d.y, -sn * d.x + cs * d.y);
     l.x *= b.w;
@@ -85,9 +88,11 @@ void main() {
     float sd = shapeSdf(int(b.x + 0.5), l, h);
     float t = clamp(0.5 + 0.5 * l.x / h.x, 0.0, 1.0);
     float ramp = min(1.0, mix(r.x, r.y, t) + r.z);
-    vec3 m = vec3(equal(vec3(b.y), vec3(0.0, 1.0, 2.0)));
-    dens = max(dens, m * (sd < uCell ? ramp : 0.0));
-    dist = min(dist, mix(vec3(1e5), vec3(sd), m));
+    int code = int(r.w + 0.5);               // plate + 3 × tint plate
+    vec3 m0 = vec3(equal(ivec3(code % 3), ivec3(0, 1, 2)));
+    vec3 m1 = vec3(equal(ivec3(code / 3), ivec3(0, 1, 2)));
+    dens = max(dens, (m0 * ramp + m1 * uTint) * (sd < uCell ? 1.0 : 0.0));
+    dist = min(dist, mix(vec3(1e5), vec3(sd), m0 + m1));
   }
   float halfPx = uFull.y / uHalf.y;
   oDensity = vec4(dens, 1.0);
