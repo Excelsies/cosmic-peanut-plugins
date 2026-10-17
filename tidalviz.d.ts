@@ -79,7 +79,10 @@ export interface AudioFrame {
   /** True while the source is silent (also true when capture permission is missing). */
   readonly silent: boolean;
 
-  /** Host frame counter. */
+  /**
+   * Host frame counter. During digital silence an unchanged frame is resent only once a second, so
+   * this and `hostTime` then advance about once a second (skipping the frames not sent).
+   */
   readonly frameIndex: number;
   /** Source sample rate in Hz. */
   readonly sampleRate: number;
@@ -245,6 +248,8 @@ export interface VisualizerManifestEntry {
   renderer: RendererKind;
   /** For webgpu entries: `id` of another entry in this manifest to use when WebGPU is unavailable. */
   fallback?: string;
+  /** webgl2 and three only: false creates the canvas without a depth buffer. Default true. */
+  depth?: boolean;
   /** Host-provided libraries. v1: "three". */
   libs?: "three"[];
   /** Repo-relative image path. */

@@ -8,6 +8,7 @@
       "author": "Fieldwork",
       "entry": "src/chladni.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/chladni.jpg",
       "params": [
         { "id": "palette", "type": "select", "label": "Palette", "options": ["brass", "slate", "cobalt", "mono"], "default": "brass" },
@@ -61,6 +62,7 @@
       "author": "Fieldwork",
       "entry": "src/misregister.js",
       "renderer": "webgl2",
+      "depth": false,
       "thumbnail": "thumbs/misregister.jpg",
       "params": [
         { "id": "palette", "type": "select", "label": "Palette", "options": ["riso", "bauhaus", "sunset", "mono"], "default": "riso" },

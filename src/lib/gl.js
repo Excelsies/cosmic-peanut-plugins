@@ -50,11 +50,14 @@ export function createProgram(gl, vs, fs, name) {
 
 /**
  * A color texture + framebuffer for offscreen passes. Uses RGBA16F when the GPU can render to it
- * (smooth feedback trails), else RGBA8.
+ * (smooth feedback trails), else RGBA8; with `red`, one channel (R16F, else R8).
  * @param {WebGL2RenderingContext} gl
+ * @param {{ red?: boolean }} [opts]
  */
-export function createTarget(gl) {
+export function createTarget(gl, opts = {}) {
   const float = Boolean(gl.getExtension("EXT_color_buffer_float"));
+  const format = opts.red ? gl.RED : gl.RGBA;
+  const internal = opts.red ? (float ? gl.R16F : gl.R8) : float ? gl.RGBA16F : gl.RGBA8;
   const tex = /** @type {WebGLTexture} */ (gl.createTexture());
   const fbo = /** @type {WebGLFramebuffer} */ (gl.createFramebuffer());
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -65,6 +68,7 @@ export function createTarget(gl) {
   return {
     tex,
     fbo,
+    float,
     width: 0,
     height: 0,
     /** (Re)allocate storage and clear to black. @param {number} w @param {number} h */
@@ -72,8 +76,7 @@ export function createTarget(gl) {
       this.width = w;
       this.height = h;
       gl.bindTexture(gl.TEXTURE_2D, tex);
-      if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, float ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
       gl.clearColor(0, 0, 0, 1);
