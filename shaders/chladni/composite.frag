@@ -14,6 +14,10 @@ uniform vec3 u_pal[4];    // plate bottom, plate top, sand, sand on no backdrop
 uniform vec4 u_look;      // brushing, sheen, haze envelope (flash-limited), backdrop none (0/1)
 
 const vec3 LIGHT = vec3(-0.6, 0.6, 0.55);
+// How much the haze lifts the dust with backdrop none (0.35 on the plate). Over black the dust is
+// added light, not a veil over a lit plate: at 0.35 a hop lifted the mean luma of a slate frame by
+// up to 7 levels (46%) in one frame; at 0.2 it is at most about 5.
+const float NONE_HAZE = 0.2;
 
 uint pcg(uint v) {
   uint state = v * 747796405u + 2891336453u;
@@ -67,13 +71,14 @@ void main() {
   float shade = clamp(0.25 + 0.75 * lam, 0.3, 1.6);
 
   float g = (c.g * 0.4 + (e.g + w.g + n.g + s.g) * 0.15);
-  float dust = (1.0 - exp(-2.0 * g)) * mix(0.65, 1.0, u_look.z);
+  float air = 1.0 - exp(-2.0 * g);
+  float dust = air * mix(0.65, 1.0, u_look.z);
 
   if (u_look.w > 0.5) {
     // No plate: premultiplied sand over whatever is behind the window (matte, normal alpha).
     vec3 sand = u_pal[3];
     vec3 lit = min(sand * shade + clamp(rim, 0.0, 1.0) * 0.35, vec3(1.0));
-    float d = dust * 0.8 * (1.0 - h);
+    float d = air * (0.65 + NONE_HAZE * u_look.z) * 0.8 * (1.0 - h);
     o = vec4(lit * h + sand * 0.85 * d, h + d);
     return;
   }

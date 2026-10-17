@@ -96,15 +96,19 @@ figure where it lies. Renderer: `webgl2`.
 - **Composite** (`composite.frag`): one full-resolution pass. Coverage h = 1 − exp(−1.6·R) from 5
   taps, a normal from the central-difference slope, Lambert light from the upper left plus a rim
   term, so ridges get a thin highlight and cast a thin shadow on the plate. Dust is drawn a touch
-  lighter and softer with a small offset shadow. The plate (gradient, anisotropic hash brushing,
-  sheen) never reacts to audio.
+  lighter and softer with a small offset shadow. The hop's haze envelope (0–0.5) scales the dust
+  by 0.65 + 0.35·haze on the plate and by 0.65 + 0.2·haze with Backdrop none, where the dust is
+  light added over black rather than a veil over the plate. The plate (gradient, anisotropic
+  hash brushing, sheen) never reacts to audio.
 
 ### Accessibility
 
 - **Reduce flashing** (on by default): hops are at most 2.5 per second by design (0.4 s gap),
   with Reduce flashing on or off. The haze envelope still goes through the photosensitivity
   limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second) as a
-  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts.
+  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts. Measured on
+  harness renders, a hop's first frame changes the mean luma by at most about 7 of 255 levels on
+  the brass plate (darker) and about 5 on slate with Backdrop none (brighter).
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
   reactivity 0.5, hops at half height and the bass tilt is off.
 
