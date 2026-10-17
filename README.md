@@ -41,7 +41,7 @@ streams from the old lines to the new ones. A kick (a hit whose bass jumps more 
 so not a hat, snare or clap) makes every grain hop, at most once every 0.4 s: for about 150 ms the
 figure dissolves into airborne dust with a faint haze and a small offset shadow, then lands and
 re-sharpens. Hops land on the kick itself, about 25 ms after it, and at fast tempos the gap keeps
-the stronger pattern hits. Music with no drums rarely hops and just drifts between figures. Hats
+the stronger pattern hits. Music with no drums rarely hops; the sand just follows the notes. Hats
 add a fine fizz, bass and stereo balance tilt the plate slightly, and silence freezes the last
 figure where it lies. Renderer: `webgl2`.
 
@@ -67,11 +67,10 @@ figure where it lies. Renderer: `webgl2`.
 - **Pitch** (`pitch.js`): the strongest bin between 200 Hz and 2 kHz with magnitude > 0.08 and
   more than 3× the window mean, refined by parabolic interpolation of the log magnitude, gives a
   midi note; index = clamp(floor((midi − 55)·0.72·complexity), 0, 31). A new index must hold for
-  0.2 s of summed `dt` and then changes on the next beat: the tempo tracker's predicted beat
-  (`meter.js`) or a kick, or after 1 s if no beat comes (no tempo, no drums). A melody that
-  moves on every beat or faster therefore leaves the figure where it is. Silence and atonal input
-  hold the figure. It starts on index 6, so drums alone still draw a figure. The bin window is
-  rebuilt only when the sample rate changes.
+  0.2 s of summed `dt`, so the figure follows every note of 0.2 s or longer, 0.2 s after it
+  starts. Onsets play no part: a hat or kick with a stray partial can't flip the figure. Silence
+  and atonal input hold the figure. It starts on index 6, so drums alone still draw a figure. The
+  bin window is rebuilt only when the sample rate changes.
 - **Kicks** (`kick.js`): an onset whose `bass` reaches 1.6× its pre-onset level within 50 ms,
   with `treb` rising at most 2× as much as the bass (levels floored at 0.15). The host's `onset`
   fires on any transient; this keeps the kicks. A kick under a loud hat (the treble rising more
@@ -106,8 +105,8 @@ figure where it lies. Renderer: `webgl2`.
 - **Reduce flashing** (on by default): hops are at most 2.5 per second by design (0.4 s gap),
   with Reduce flashing on or off. The haze envelope still goes through the photosensitivity
   limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second) as a
-  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts, at most one per
-  beat.
+  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts, and at least
+  0.2 s apart.
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
   reactivity 0.5, hops at half height and the bass tilt is off.
 
@@ -809,7 +808,7 @@ General-purpose helpers, one copy each:
   mono or bit-identical channels (Soapfilm's, Miura's and Kelir's stereo drift).
 - `color.js`: `#rrggbb` param parsing with a fallback.
 - `meter.js`: a beat counter on the host's `beatPhase` that ignores tempo-tracker jitter
-  (Plotter's phrases, Misregister's re-layouts, Chladni's figure changes).
+  (Plotter's phrases, Misregister's re-layouts).
 - `kick.js`: kicks out of the host's generic onsets, by a bass rise that the treble doesn't
   outrun (Chladni's hops).
 - `beatclock.js`: a continuous clock in beats that runs free at 1 beat/s without a tempo

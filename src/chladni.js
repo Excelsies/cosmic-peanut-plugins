@@ -6,7 +6,7 @@
  * figure from a table of plate modes (lib/modes.js); sand grains, simulated on the GPU with
  * transform feedback (shaders/chladni/update.vert, constants in lib/sand.js), are shaken off the
  * antinodes and drift into the node lines, so the figure draws itself and re-forms whenever the
- * note changes, on a beat. Bass-led kicks (lib/kick.js) make every grain hop, at most one hop per
+ * note changes. Bass-led kicks (lib/kick.js) make every grain hop, at most one hop per
  * 0.4 s; hats add fizz, bass and stereo balance tilt the plate, silence freezes the sand where it
  * lies.
  *
@@ -20,7 +20,6 @@ import { createProgram, createTarget } from "./lib/gl.js";
 import { createResolved, paletteColors, PLATE_FINISH, resolveParams } from "./lib/chladni-params.js";
 import { buildModeTable, createCrossfade, MODE_STRIDE, START_MODE } from "./lib/modes.js";
 import { createKick } from "./lib/kick.js";
-import { createMeter } from "./lib/meter.js";
 import { createModeGate, createPitch } from "./lib/pitch.js";
 import {
   AIR_DRAG,
@@ -142,7 +141,6 @@ export default async function create(ctx) {
   const plateDrive = createPlateDrive();
   const hop = createHop();
   const kick = createKick();
-  const meter = createMeter();
   const clock = createFixedStep(SIM_STEP, MAX_STEPS);
   const stereo = createStereo();
   const field = new Float32Array(4);
@@ -160,13 +158,11 @@ export default async function create(ctx) {
       const dt = time.dt;
       if (ctx.reduceMotion !== lastReduceMotion || ctx.quality !== lastQuality) applyParams();
 
-      // Audio → kick, figure, drive, tilt, hop. A new figure waits for a beat: the tempo
-      // tracker's predicted beat or a kick.
+      // Audio → kick, figure, drive, tilt, hop.
       const kicked = kick.step(audio, dt);
-      const beat = meter.step(audio.bpm, audio.beatPhase, dt) || kicked;
       pitch.setSampleRate(audio.sampleRate);
       const midi = audio.silent ? NaN : pitch.midi(audio.spectrum);
-      fade.switchTo(gate.step(midi, beat, dt, res.complexity), res.reduceMotion);
+      fade.switchTo(gate.step(midi, dt, res.complexity), res.reduceMotion);
       fade.step(dt);
       // sand.js takes +1 = left heavy; stereo.js gives +1 = right heavy.
       const balance = -stereoFrame(audio.left, audio.right, stereo).balance;

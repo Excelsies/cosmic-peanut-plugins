@@ -1,9 +1,9 @@
 // @ts-check
 /**
  * Pitch → Chladni figure. The strongest clear partial between 200 Hz and 2 kHz picks a mode table
- * index: higher notes, finer figures. A note must hold for 0.2 s of audio time, and the figure
- * then changes on the next beat (or after BEAT_WAIT without one); silence or atonal input holds
- * the last figure. All of it allocates nothing per frame.
+ * index: higher notes, finer figures. A note must hold for 0.2 s of audio time before the figure
+ * changes, and silence or atonal input holds the last figure. Onsets play no part: kicks and hats
+ * with a stray partial must not flip the figure. All of it allocates nothing per frame.
  */
 
 const F_LO = 200;
@@ -14,12 +14,6 @@ const MIN_MAG = 0.08;
 const MIN_PROMINENCE = 3;
 /** Seconds a new candidate must hold before the figure follows it. */
 export const HOLD = 0.2;
-/**
- * Seconds a held candidate waits for a beat before the figure follows it anyway. The host's tempo
- * tracker reports 60 bpm at the slowest, so with a tempo a beat always comes within 1 s; without
- * one (no tempo, no drums) the figure follows 1.2 s after the note settles.
- */
-export const BEAT_WAIT = 1.0;
 /** Mode table size (pitch.js and modes.js agree on 32). */
 const LAST_INDEX = 31;
 
@@ -82,48 +76,37 @@ export function candidateIndex(midi, complexity) {
 }
 
 /**
- * Debounces candidates into the target mode. A candidate becomes pending once it has held for
- * HOLD seconds (summed dt, so frame-rate independent), and replaces the target on the next beat,
- * or after BEAT_WAIT seconds without one. A new candidate restarts the hold and the wait; NaN (no
- * clear note) holds the target and drops the pending one.
+ * Debounces candidates into the target mode. A candidate replaces the target once it has held for
+ * HOLD seconds (summed dt, so frame-rate independent), so the figure follows each note that lasts
+ * 0.2 s or more, HOLD after it starts, and switches are at least HOLD apart. NaN (no clear note)
+ * holds the target and restarts the hold.
  * @param {number} start initial target index
  */
 export function createModeGate(start) {
   let target = start;
   let candidate = -1;
   let held = 0;
-  let waited = 0;
   return {
     /**
      * @param {number} midi from createPitch().midi, NaN for none
-     * @param {boolean} beat a beat on this frame (predicted beat or kick)
      * @param {number} dt seconds
      * @param {number} complexity
      * @returns {number} the target mode index
      */
-    step(midi, beat, dt, complexity) {
+    step(midi, dt, complexity) {
       if (Number.isNaN(midi)) {
         candidate = -1;
         held = 0;
-        waited = 0;
         return target;
       }
       const c = candidateIndex(midi, complexity);
       if (c !== candidate) {
         candidate = c;
         held = 0;
-        waited = 0;
       } else {
         held += dt;
       }
-      if (c !== target && held >= HOLD - 1e-9) {
-        if (beat || waited >= BEAT_WAIT - 1e-9) {
-          target = c;
-          waited = 0;
-        } else {
-          waited += dt;
-        }
-      }
+      if (held >= HOLD - 1e-9) target = c;
       return target;
     },
   };
