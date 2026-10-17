@@ -52,6 +52,30 @@ describe("createKick", () => {
     expect(confirmsAt(7, 1 / 120)).toBe(false);
   });
 
+  it("times the window from the onset frame with uneven frame times", () => {
+    // The onset frame's own dt is time before the onset: it must not count against the window.
+    /** @param {number[]} dts dt of the frame before, the onset frame, then each later frame; the last one doubles the bass */
+    const confirmsLast = (dts) => {
+      const k = createKick();
+      k.step(frame(1, 1), dts[0]);
+      let hit = false;
+      for (let i = 1; i < dts.length; i++) hit = k.step(frame(i === dts.length - 1 ? 2 : 1, 1, { onset: i === 1 }), dts[i]);
+      return hit;
+    };
+    expect(confirmsLast([1 / 60, 0.1, 1 / 60])).toBe(true); // a hitch just before the onset: 16.7 ms after it
+    expect(confirmsLast([1 / 60, 0.001, 0.02, 0.02, 0.02])).toBe(false); // 60 ms after the onset
+    expect(confirmsLast([1 / 60, 0.001, 0.02, 0.02, 0.01])).toBe(true); // 50 ms after the onset
+  });
+
+  it("counts a NaN or negative dt as no time", () => {
+    const k = createKick();
+    expect(run(k, [frame(1, 1)])).toEqual([false]);
+    expect(k.step(frame(1, 1, { onset: true }), NaN)).toBe(false);
+    expect(k.step(frame(1, 1), NaN)).toBe(false);
+    expect(k.step(frame(1, 1), -1)).toBe(false);
+    expect(k.step(frame(2, 1), DT)).toBe(true);
+  });
+
   it("confirms on the onset frame itself when the bass has already jumped", () => {
     const k = createKick();
     expect(run(k, [frame(1, 1), frame(2, 1, { onset: true })])).toEqual([false, true]);

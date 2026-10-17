@@ -49,21 +49,21 @@ export function createKick() {
       const bass = silent ? 0 : num(audio.bass, 0);
       const treb = silent ? 0 : num(audio.treb, 0);
       let kick = false;
+      // Seconds since the onset frame, counted on the frame they end on: frame k after the onset
+      // sees the dt of frames 1..k, not the onset frame's own dt (time before the onset).
       if (audio.onset) {
         since = 0;
         baseBass = Math.max(prevBass, LEVEL_FLOOR);
         baseTreb = Math.max(prevTreb, LEVEL_FLOOR);
         const s = num(audio.onsetStrength, 0);
         latched = s > 1 ? 1 : s > 0 ? s : 0;
+      } else {
+        since += dt > 0 ? dt : 0; // NaN too, or `since` would turn NaN and close the window
       }
-      if (since <= KICK_WINDOW + 1e-9) {
-        if (bass >= BASS_RISE * baseBass) {
-          since = Infinity;
-          kick = treb / baseTreb <= TREB_LEAD * (bass / baseBass);
-          if (kick) k.strength = latched;
-        } else {
-          since += Math.max(0, dt);
-        }
+      if (since <= KICK_WINDOW + 1e-9 && bass >= BASS_RISE * baseBass) {
+        since = Infinity;
+        kick = treb / baseTreb <= TREB_LEAD * (bass / baseBass);
+        if (kick) k.strength = latched;
       }
       prevBass = bass;
       prevTreb = treb;
