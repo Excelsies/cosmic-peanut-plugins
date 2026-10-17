@@ -81,7 +81,6 @@
       "author": "Fieldwork",
       "entry": "src/soapfilm.js",
       "renderer": "webgl2",
-      "depth": false,
       "thumbnail": "thumbs/soapfilm.jpg",
       "params": [
         { "id": "backdrop", "type": "select", "label": "Backdrop", "options": ["velvet", "studio", "none"], "default": "velvet" },
