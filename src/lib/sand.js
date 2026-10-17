@@ -89,7 +89,7 @@ export function createHop() {
      * @param {boolean} reduceFlashing
      */
     step(kick, strength, hop, dt, reduceFlashing) {
-      const d = Math.max(0, dt);
+      const d = dt > 0 ? dt : 0; // NaN too, or `since` would stay NaN and stop hops for good
       since += d;
       const s = strength > 1 ? 1 : strength > 0 ? strength : 0;
       const want = kick && hop > 0 && since >= MIN_HOP_GAP - 1e-9;

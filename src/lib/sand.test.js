@@ -130,6 +130,17 @@ describe("hop", () => {
     expect([b.impulse, b.scatter, b.seq]).toEqual([0, 0, 1]);
   });
 
+  it("treats a NaN or negative dt as 0 and keeps hopping afterwards", () => {
+    const hop = createHop();
+    expect(hop.step(true, 1, 1, DT, false).seq).toBe(1);
+    hop.step(false, 0, 1, NaN, false);
+    hop.step(false, 0, 1, -1, false);
+    for (let i = 0; i < 30; i++) hop.step(false, 0, 1, DT, false);
+    const h = hop.step(true, 1, 1, DT, false);
+    expect(h.seq).toBe(2);
+    expect(Number.isFinite(h.haze)).toBe(true);
+  });
+
   it("does nothing at Hop 0", () => {
     const hop = createHop();
     for (let i = 0; i < 60; i++) {
