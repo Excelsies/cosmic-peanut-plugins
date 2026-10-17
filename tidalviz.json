@@ -110,6 +110,25 @@
         { "id": "light", "type": "select", "label": "Light", "options": ["window", "noon", "low-sun"], "default": "window" },
         { "id": "shadows", "type": "boolean", "label": "Shadows", "default": true }
       ]
+    },
+    {
+      "id": "isobar",
+      "name": "Isobar",
+      "description": "A live surface-pressure weather chart: heavy bass deepens the lows and crowds their isobars, kicks snap the rings inward, fronts sweep out with their glyphs, rain follows the hats, and the weather drifts east at the song's tempo.",
+      "author": "Fieldwork",
+      "entry": "src/isobar.js",
+      "renderer": "2d",
+      "thumbnail": "thumbs/isobar.jpg",
+      "params": [
+        { "id": "chart", "type": "select", "label": "Chart", "options": ["paper", "broadcast", "night", "none"], "default": "paper" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0.2, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "fronts", "type": "boolean", "label": "Fronts", "default": true },
+        { "id": "barbs", "type": "boolean", "label": "Wind barbs", "default": true },
+        { "id": "labels", "type": "boolean", "label": "Labels", "default": true },
+        { "id": "coastline", "type": "boolean", "label": "Coastline", "default": true },
+        { "id": "tints", "type": "boolean", "label": "Warm-sector tint", "default": true }
+      ]
     }
   ]
 }
