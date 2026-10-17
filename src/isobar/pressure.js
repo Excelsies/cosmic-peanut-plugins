@@ -42,6 +42,9 @@ const HIGH_SIGMA = 0.3;
 const SPAWN_GAP = 8; // beats between onset spawns
 const IDLE_SPAWN = 4; // beats without any low before one starts anyway
 const SPAWN_STRENGTH = 0.4;
+const SPAWN_TRIES = 4;
+/** Latitude spread of spawns around the storm track (lows are ~0.4 wide, so they need room). */
+const SPAWN_SPREAD = 0.4;
 const BASS_DEPTH = 28; // hPa per unit of bassAtt above 1
 const KICK_DEPTH = 6; // hPa per unit of onsetStrength
 const T_ATTACK = 0.06;
@@ -185,11 +188,27 @@ function spawnLow(st) {
   }
   if (slot < 0) return -1;
   const id = st.nextId++;
+  // Of a few hashed spots in the west, the one farthest from the live lows (so lows don't stack).
+  let bestX = 0;
+  let bestY = 0;
+  let bestD = -1;
+  for (let c = 0; c < SPAWN_TRIES; c++) {
+    const x = (0.05 + 0.35 * hash01(id + 101 * c)) * st.aspect;
+    const y = Math.min(0.8, Math.max(0.2, 0.5 - 0.25 * st.balanceS + SPAWN_SPREAD * (hash01(id + 7 + 101 * c) - 0.5)));
+    let d = 1e9;
+    for (let k = 0; k < MAX_LOWS; k++) {
+      if (st.alive[k]) d = Math.min(d, (st.x[k] - x) ** 2 + (st.y[k] - y) ** 2);
+    }
+    if (d > bestD + 1e-12) {
+      bestD = d;
+      bestX = x;
+      bestY = y;
+    }
+  }
   st.alive[slot] = 1;
   st.id[slot] = id;
-  st.x[slot] = (0.05 + 0.35 * hash01(id)) * st.aspect;
-  const y = 0.5 - 0.25 * st.balanceS + 0.1 * (hash01(id + 7) - 0.5);
-  st.y[slot] = Math.min(0.8, Math.max(0.2, y));
+  st.x[slot] = bestX;
+  st.y[slot] = bestY;
   st.ageBeats[slot] = 0;
   st.sigma[slot] = lowSigma(0);
   st.amp[slot] = lifecycleAmp(0);

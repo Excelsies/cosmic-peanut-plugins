@@ -145,6 +145,24 @@ describe("stepPressure", () => {
     expect(lows(st)).toHaveLength(2);
   });
 
+  it("spawns a new low away from the live ones", () => {
+    const st = createPressure(16 / 9);
+    run(st, 1 / 60, 60);
+    const kick = (/** @type {number} */ t, /** @type {any} */ a) => {
+      if (Math.abs(t * 2 - Math.round(t * 2)) < 1e-6) {
+        a.onset = true;
+        a.onsetStrength = 0.9;
+      }
+      a.bassAtt = a.bass = 1.6;
+    };
+    run(st, 12.5, 60, kick, 1 / 60); // spawns at 4, 8 and 12 s
+    const l = lows(st);
+    expect(l).toHaveLength(4);
+    for (const a of l) {
+      for (const b of l) if (a !== b) expect(Math.hypot(st.x[a] - st.x[b], st.y[a] - st.y[b])).toBeGreaterThan(0.08);
+    }
+  });
+
   it("does not spawn on mid-led or weak onsets", () => {
     const st = createPressure(16 / 9);
     run(st, 1 / 60, 60);
@@ -273,7 +291,7 @@ describe("stepPressure", () => {
       return st.y[youngestLow(st)];
     };
     const mono = spawnY(null, null);
-    expect(mono).toBeCloseTo(0.5 + 0.1 * (hash01(1 + 7) - 0.5), 5);
+    expect(mono).toBeCloseTo(0.5 + 0.4 * (hash01(1 + 7) - 0.5), 5);
     expect(spawnY(loud, loud)).toBeCloseTo(mono, 6);
     const left = spawnY(loud, quiet);
     expect(mono - left).toBeGreaterThan(0.2);
