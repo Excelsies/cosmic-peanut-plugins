@@ -8,7 +8,7 @@ import {
   RECORD_FLOATS,
   buildCast,
   holeDistance,
-  laceDistance,
+  laceCoverage,
   sdfRange,
 } from "./puppets.js";
 
@@ -120,37 +120,44 @@ describe("lace", () => {
     expect(holeDistance(0, 0, s)).toBeCloseTo(-0.32 * s, 6);
   });
 
-  it("leaves a solid border band and holes only deep inside", () => {
-    const s = 0.03;
-    // At a hole centre deep inside: a hole (positive).
-    expect(laceDistance(-0.1, 0, 0, s, 1, BORDER)).toBeGreaterThan(0);
-    // The same hole within the border band stays solid.
-    expect(laceDistance(-BORDER * 0.4, 0, 0, s, 1, BORDER)).toBeLessThan(0);
-    // Between holes deep inside: solid.
-    expect(laceDistance(-0.1, s / 2, 0, s, 1, BORDER)).toBeLessThan(0);
-    // Outside stays outside.
-    expect(laceDistance(0.01, 0, 0, s, 1, BORDER)).toBeCloseTo(0.01, 9);
+  // Coverage at a lattice point with the silhouette distance d (bone units), mask px per bone
+  // unit ppu and penumbra half-width w px. Spacing 0.03 at 1000 px per unit: hole radius 9.6 px.
+  const s = 0.03;
+  const ppu = 1000;
+  const cov = (/** @type {number} */ d, /** @type {number} */ x, /** @type {number} */ w) => laceCoverage(d, x, 0, s, BORDER, ppu, w);
+
+  it("leaves a solid border band and lets the lamp through holes deep inside", () => {
+    expect(cov(-0.1, 0, 0.75)).toBeLessThan(0.05); // a hole centre deep inside
+    expect(cov(-BORDER * 0.4, 0, 0.75)).toBeGreaterThan(0.95); // the same hole in the border band
+    expect(cov(-0.1, s / 2, 0.75)).toBeGreaterThan(0.95); // between holes
+    expect(cov(0.005, 0, 0.75)).toBe(0); // outside
+    expect(cov(-0.002, s / 2, 0.75)).toBeGreaterThan(0.95);
   });
 
-  it("dissolves the holes into solid shadow as they fade out", () => {
-    const s = 0.03;
-    expect(laceDistance(-0.1, 0, 0, s, 0, BORDER)).toBeLessThanOrEqual(-0.32 * s * 0.99);
-    // Faded out, the interior sits at least two penumbra widths deep, so a blurred shadow stays dark.
-    expect(laceDistance(-0.1, 0, 0, s, 0, BORDER, 0.02)).toBeLessThanOrEqual(-0.04);
-    // Halfway: smaller holes.
-    const half = laceDistance(-0.1, 0.2 * s, 0, s, 0.5, BORDER);
-    const full = laceDistance(-0.1, 0.2 * s, 0, s, 1, BORDER);
-    expect(half).toBeLessThan(full);
+  it("dissolves the holes gradually as the penumbra widens", () => {
+    // A blurred hole lets through 1 - exp(-2 (R / w)^2) of the lamp at its centre.
+    const sharp = cov(-0.1, 0, 0.75);
+    const even = cov(-0.1, 0, 9.6);
+    const twice = cov(-0.1, 0, 19.2);
+    const soft = cov(-0.1, 0, 40);
+    expect(even).toBeGreaterThan(sharp + 0.05);
+    expect(even).toBeLessThan(0.5);
+    expect(twice).toBeGreaterThan(0.5);
+    expect(twice).toBeLessThan(0.85);
+    expect(soft).toBeGreaterThan(0.9);
+  });
+
+  it("drops holes too small to draw without shimmering", () => {
+    expect(laceCoverage(-0.1, 0, 0, s, BORDER, 80, 0.75)).toBeGreaterThan(0.95); // 0.8 px holes
   });
 
   it("is continuous across the border band", () => {
-    const s = 0.03;
     for (const hx of [0, 0.004, 0.009]) {
-      let prev = laceDistance(-0.05, hx, 0, s, 1, BORDER);
+      let prev = cov(-0.05, hx, 0.75);
       for (let i = 1; i <= 600; i++) {
-        const d = -0.05 + i * 0.0001;
-        const v = laceDistance(d, hx, 0, s, 1, BORDER);
-        expect(Math.abs(v - prev)).toBeLessThanOrEqual(0.0001 + 1e-9);
+        const v = cov(-0.05 + i * 0.0001, hx, 0.75);
+        // A step of 0.1 px can move coverage by at most about its share of the 1.5 px edge.
+        expect(Math.abs(v - prev)).toBeLessThanOrEqual(0.15);
         prev = v;
       }
     }

@@ -287,15 +287,27 @@ export function holeDistance(/** @type {number} */ x, /** @type {number} */ y, /
   return Math.min(circle, drop);
 }
 
+/** @param {number} a @param {number} b @param {number} x */
+function smoothstep(a, b, x) {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
 /**
- * The silhouette's distance with lace: holes pierce everything deeper than the border band.
- * `fade` (0..1) shrinks the holes away; `soft` (bone units, the penumbra half-width) sets how deep
- * the faded interior sits, so a blurred, hole-less shadow stays fully dark.
- * @param {number} d silhouette distance @param {number} x @param {number} y lattice-frame point
- * @param {number} s spacing @param {number} fade @param {number} border @param {number} [soft]
+ * Shadow coverage (0..1, before opacity) of a laced silhouette: the body's coverage with a
+ * penumbra of half-width w px, times (1 - the lamp light through the nearest hole). Holes keep
+ * out of the border band; a blurred hole of radius R passes 1 - exp(-2 (R / w)^2) of the light
+ * at its centre, so the lace dissolves as the shadow softens; holes under ~1.5 px are dropped.
+ * @param {number} d silhouette distance, bone units @param {number} x @param {number} y
+ * lattice-frame point @param {number} s spacing @param {number} border band, bone units
+ * @param {number} ppu mask px per bone unit @param {number} w penumbra half-width, px
  */
-export function laceDistance(d, x, y, s, fade, border, soft = 0) {
-  const hole = -holeDistance(x, y, s) - (1 - fade) * 2 * (HOLE * s + soft);
-  const e = -(d + border);
-  return Math.max(d, Math.min(hole, e));
+export function laceCoverage(d, x, y, s, border, ppu, w) {
+  const body = 1 - smoothstep(-w, w, d * ppu);
+  if (body <= 0) return 0;
+  const r = HOLE * s * ppu;
+  const contrast = (1 - Math.exp((-2 * r * r) / (w * w))) * smoothstep(1, 2, r);
+  const hole = (1 - smoothstep(-w, w, holeDistance(x, y, s) * ppu)) * contrast;
+  const band = 1 - smoothstep(-w, w, (d + border) * ppu);
+  return body * (1 - hole * band);
 }
