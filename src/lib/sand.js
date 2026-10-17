@@ -109,7 +109,7 @@ export function createPlateDrive() {
   return {
     /**
      * @param {{ midAtt: any, rms: any, silent: any, trebAtt: any, flux: any, bassAtt: any }} audio
-     * @param {number} balance stereo balance −1…1 (0 for mono)
+     * @param {number} balance stereo balance −1…1, +1 = left heavy (0 for mono)
      * @param {number} reactivity effective Reactivity
      * @param {boolean} bassTilt false under reduce motion
      * @param {number} dt

@@ -1,42 +1,47 @@
 // @ts-check
 /**
- * Fixed-timestep accumulator: turns a variable frame `dt` into a whole number of simulation steps
- * so a simulation runs the same at 60 Hz and 120 Hz. At most `maxSteps` per frame; a longer
- * backlog (a hitch, a hidden tab) is dropped instead of being caught up, so a slow frame never
- * causes a slower one.
+ * Fixed-timestep clock, shared by the Fieldwork visualizers: turns variable frame `dt`s into a
+ * whole number of simulation steps of `step` seconds, so a simulation gives the same result at 30,
+ * 60, 120 or 144 Hz. At most `maxSteps` run per frame; a longer backlog (a hitch, a hidden tab) is
+ * dropped instead of being caught up, so a slow frame never causes a slower one.
  *
  *   const clock = createFixedStep(1 / 120, 4);
  *   // in frame():
- *   const { steps, alpha } = clock.advance(time.dt);
+ *   const steps = clock.advance(time.dt); // then clock.alpha for interpolation
  *
- * `advance` allocates nothing and returns the same object every call.
+ * `advance` allocates nothing.
  *
- * @param {number} step seconds per simulation step
- * @param {number} maxSteps cap per frame
+ * @param {number} step seconds per simulation step, e.g. 1 / 120
+ * @param {number} maxSteps cap on steps per frame
  */
 export function createFixedStep(step, maxSteps) {
-  // Tolerance so 1/60 + 1/60 … lands on exactly two 1/120 steps despite float rounding.
-  const eps = step * 1e-6;
   let acc = 0;
-  const out = { steps: 0, alpha: 0 };
-  return {
-    /** @param {number} dt seconds since the previous frame */
+  const fs = {
+    step,
+    /** Leftover fraction of a step after the last `advance`, 0–1 (for interpolating). */
+    alpha: 0,
+    /**
+     * @param {number} dt seconds since the previous frame (zero, negative or non-finite: ignored)
+     * @returns {number} how many fixed steps to run now
+     */
     advance(dt) {
-      if (dt > 0) acc += dt;
-      let n = 0;
-      while (acc >= step - eps && n < maxSteps) {
-        acc -= step;
-        n++;
+      if (dt > 0 && dt < Infinity) acc += dt;
+      // The epsilon keeps 1/60 = 2 × 1/120 (or 10 × 1/600) from flooring one short through rounding.
+      let n = Math.floor(acc / step + 1e-6);
+      if (n > maxSteps) {
+        n = maxSteps;
+        acc = 0;
+      } else {
+        acc = Math.max(0, acc - n * step);
       }
-      if (acc >= step - eps) acc = 0; // over the cap: drop the backlog
-      if (acc < 0) acc = 0;
-      out.steps = n;
-      out.alpha = acc / step;
-      return out;
+      fs.alpha = acc / step;
+      return n;
     },
     /** Forget any partial step. */
     reset() {
       acc = 0;
+      fs.alpha = 0;
     },
   };
+  return fs;
 }

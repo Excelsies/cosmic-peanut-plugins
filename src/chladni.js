@@ -36,7 +36,7 @@ import {
   SIM_STEP,
   U_FLOOR,
 } from "./lib/sand.js";
-import { stereoImage } from "./lib/stereo.js";
+import { createStereo, stereoFrame } from "./lib/stereo.js";
 
 /** Density target resolution relative to the canvas: sand is soft at this scale once lit. */
 const DENSITY_SCALE = 0.5;
@@ -139,6 +139,7 @@ export default async function create(ctx) {
   const plateDrive = createPlateDrive();
   const hop = createHop();
   const clock = createFixedStep(SIM_STEP, MAX_STEPS);
+  const stereo = createStereo();
   const field = new Float32Array(4);
   const drive = new Float32Array(4);
   const tilt = new Float32Array(4);
@@ -159,8 +160,9 @@ export default async function create(ctx) {
       const midi = audio.silent ? NaN : pitch.midi(audio.spectrum);
       fade.switchTo(gate.step(midi, audio.onset, dt, res.complexity), res.reduceMotion);
       fade.step(dt);
-      const st = stereoImage(audio.left, audio.right);
-      const pd = plateDrive.step(audio, st.balance, res.reactivity, res.bassTilt, dt);
+      // sand.js takes +1 = left heavy; stereo.js gives +1 = right heavy.
+      const balance = -stereoFrame(audio.left, audio.right, stereo).balance;
+      const pd = plateDrive.step(audio, balance, res.reactivity, res.bassTilt, dt);
       const hp = hop.step(audio.onset, audio.onsetStrength, res.hop, dt, ctx.reduceFlashing);
       if (hp.impulse > 0) {
         pendingVz = hp.impulse;
@@ -169,7 +171,7 @@ export default async function create(ctx) {
       }
 
       // 1. Update: 0–4 fixed steps through transform feedback.
-      const steps = clock.advance(dt).steps;
+      const steps = clock.advance(dt);
       if (steps > 0) {
         const oa = fade.a * MODE_STRIDE;
         const ob = fade.b * MODE_STRIDE;
