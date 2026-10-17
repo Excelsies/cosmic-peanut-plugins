@@ -13,6 +13,18 @@ export const PERCEPTION = 0.12;
 export const TOPO_K = 7;
 
 const P2 = PERCEPTION * PERCEPTION;
+/**
+ * Cell offsets (x, y, z) in visit order: own cell, the 6 face neighbours, 12 edges, 8 corners.
+ * Nearer cells first tighten the 7th-nearest distance sooner, so more far cells are skipped.
+ */
+// prettier-ignore
+const OFFSETS = new Int8Array([
+  0, 0, 0,
+  -1, 0, 0, 1, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, -1, 0, 0, 1,
+  -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0, -1, 0, -1, 1, 0, -1,
+  -1, 0, 1, 1, 0, 1, 0, -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1,
+  -1, -1, -1, 1, -1, -1, -1, 1, -1, 1, 1, -1, -1, -1, 1, 1, -1, 1, -1, 1, 1, 1, 1, 1,
+]);
 
 /**
  * Grid dimensions for the frame half-extents f.hx/f.hy. Birds stay within the soft walls (85%)
@@ -82,7 +94,8 @@ export function buildGrid(f) {
 /**
  * The (up to) 7 nearest birds within the perception radius of bird i, nearest first, into
  * f.nbIdx/f.nbD2. Needs the grid of the current positions (buildGrid). Scans i's own cell first,
- * then skips any neighbouring cell that can't hold anything nearer than what was already found.
+ * then the others nearest first (OFFSETS), skipping any cell that can't hold anything nearer
+ * than what was already found.
  * One flat loop with locals: this is the simulation's hot path.
  * @param {Flock} f @param {number} i
  * @returns {number} neighbour count
@@ -110,22 +123,19 @@ export function findNeighbors(f, i) {
   const lx = x + f.gx0 - cx * PERCEPTION;
   const ly = y + f.gy0 - cy * PERCEPTION;
   const lz = z + f.gz0 - cz * PERCEPTION;
-  // Visit order: own cell (o = 13) first, then the other 26.
-  for (let o = 13, visited = 0; visited < 27; visited++, o = o === 26 ? 0 : o + 1) {
-    if (visited > 0 && o === 13) o++;
-    const ox = (o % 3) - 1;
-    const oy = (((o / 3) | 0) % 3) - 1;
-    const oz = ((o / 9) | 0) - 1;
+  for (let v = 0; v < 81; v += 3) {
+    const ox = OFFSETS[v];
+    const oy = OFFSETS[v + 1];
+    const oz = OFFSETS[v + 2];
     const nx = cx + ox;
     const ny = cy + oy;
     const nz = cz + oz;
     if (nx < 0 || nx >= gw || ny < 0 || ny >= gh || nz < 0 || nz >= gd) continue;
-    if (visited > 0) {
+    if (v > 0) {
       const ex = ox < 0 ? lx : ox > 0 ? PERCEPTION - lx : 0;
       const ey = oy < 0 ? ly : oy > 0 ? PERCEPTION - ly : 0;
       const ez = oz < 0 ? lz : oz > 0 ? PERCEPTION - lz : 0;
-      const edge2 = ex * ex + ey * ey + ez * ez;
-      if (edge2 >= worst) continue;
+      if (ex * ex + ey * ey + ez * ez >= worst) continue;
     }
     const cell = (nz * gh + ny) * gw + nx;
     const end = start[cell + 1];

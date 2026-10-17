@@ -3,8 +3,9 @@
  * Starling flock simulation, CPU, structure of arrays, one fixed 1/60 s step per call.
  *
  * Each bird steers by its 7 nearest neighbours within 0.12 units (topological, like real
- * starlings), found through grid.js's uniform 3D grid, rebuilt every step. Each bird's neighbour list is refreshed every third step (a
- * third of the flock per step), which cuts the search cost to a third; neighbours change slowly.
+ * starlings), found through grid.js's uniform 3D grid, rebuilt every step. Each bird's neighbour
+ * list is refreshed every fourth step (a quarter of the flock per step), which cuts the search
+ * cost to a quarter; neighbours change slowly.
  * Forces: separation Σ(pi − pj)/d² over those neighbours closer than SEP_RADIUS; alignment and
  * cohesion toward the neighbours; a spring toward the attractor beyond the flock radius; soft
  * walls beyond 85% of the frame; a flee burst from the falcon; a one-off sideways kick as each
@@ -38,7 +39,7 @@ const ROLL_MAX = 1.25;
 const ROLL_KEEP = Math.exp(-STEP / 0.15);
 const CRUISE_RELAX = 1.5; // 1/s, pull toward cruise speed
 /** Steps between neighbour-list refreshes of one bird. */
-const REFRESH = 3;
+const REFRESH = 4;
 
 /**
  * Seeded PRNG (mulberry32). Only for setup; frames never draw random numbers.
@@ -84,7 +85,7 @@ export function createFlock(max = MAX_BIRDS) {
     // Neighbour scratch.
     nbIdx: new Int32Array(TOPO_K),
     nbD2: new Float32Array(TOPO_K),
-    // Cached neighbour lists, refreshed for a third of the birds each step.
+    // Cached neighbour lists, refreshed for a quarter of the birds each step.
     nb: new Int32Array(max * TOPO_K),
     nbN: new Uint8Array(max),
     steps: 0,

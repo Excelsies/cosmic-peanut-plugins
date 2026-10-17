@@ -36,8 +36,8 @@ strike. A `three` visualizer.
 - **Flock** (`src/lib/flock.js`): a CPU simulation in fixed 1/60 s steps (`fixedstep.js`, at most
   2 per frame), structure of arrays sized for 6,000 birds. Each bird follows its 7 nearest
   neighbours within 0.12 units (topological, like real starlings), found through a uniform 3D
-  grid rebuilt each step by a counting sort into cell order; each bird's list is refreshed every
-  third step. Forces: separation Σ(pi − pj)/d² below 0.055, alignment, cohesion, a spring toward
+  grid (`grid.js`) rebuilt each step by a counting sort into cell order; each bird's list is
+  refreshed every fourth step. Forces: separation Σ(pi − pj)/d² below 0.055, alignment, cohesion, a spring toward
   the bird's own place on the flock's shape curve beyond its share of the tube radius there
   (birds with a small share make the dense core), soft walls at 85% of the frame, the falcon
   flee and a one-off sideways kick as a wave passes. Speed is clamped to 0.5–1.6 × cruise; roll
