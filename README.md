@@ -59,7 +59,8 @@ over 1.2 s. A hairline wire frames the window. Renderer: `webgl2`.
   jet plus a pair of Rankine vortices (circulation ±2·rise·r, core 0.6r), which curl its head into
   a mushroom. d relaxes as e^(−t/4) and is clamped to 0.2; p fades as e^(−t/8); the re-dip region
   is cleared. Without `EXT_color_buffer_float` the pair is `RGBA8` with d stored as 0.5 + 2d and p
-  as 0.5 + p/1.2, a coarser, documented degraded look.
+  as 0.5 + p/1.2: a documented degraded look in which the plumes still rise and curl but the
+  slow swirl is lost to 8-bit rounding, so the bands stay straight.
 - **Composite** (`composite.frag`, full resolution): bilinear d and p, the base bands evaluated
   per pixel (so fringes stay hairline-crisp even at 2560×1440), the table looked up at h with the
   angle row interpolated, one broad highlight lobe sloping across the upper third plus a 10%
