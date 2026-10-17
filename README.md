@@ -6,6 +6,9 @@ package, same layout as `plugins/cosmic-peanut`: `tidalviz.json` at the root, en
 `src/` (Miura's and Kelir's in `src/<id>/`), pure logic with its tests in `src/lib/` (the first
 four and the shared helpers) or in the visualizer's own folder (`src/soapfilm/`, `src/isobar/`,
 `src/miura/lib/`, `src/kelir/lib/`), shaders in `shaders/<id>/`, thumbnails in `thumbs/`, and a byte copy of `web/sdk/tidalviz.d.ts`.
+Install it in the app with **Library → Add from URL** and `Excelsies/cosmic-peanut-plugins`
+(this package, published on its own with `tidalviz.json` at the repo root).
+
 Run it from source with hot reload:
 
 ```sh
@@ -13,7 +16,7 @@ uv run --extra gtk tidalviz --dev plugins/fieldwork --source synthetic:demo   # 
 uv run tidalviz --dev plugins/fieldwork                                       # macOS
 ```
 
-or add the folder in the app with **Library → Add folder**.
+or add the folder in the app with **Library → Add dev folder…**.
 
 | Visualizer | Renderer | What it is |
 | --- | --- | --- |
