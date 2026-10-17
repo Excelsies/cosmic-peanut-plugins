@@ -1,7 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import { createDrive } from "./drive.js";
-import { createControls, createFlock, resizeFlock, seedFlock } from "./flock.js";
+import { createControls, createFlock, resizeFlock, seedFlock, stepFlock } from "./flock.js";
 import { createParamState, resolveParams } from "./murmuration-params.js";
 
 const HX = 5.13;
@@ -45,6 +45,28 @@ describe("createDrive", () => {
     expect(c.cohesion).toBeCloseTo(loud.c.cohesion * 0.5, 1);
     expect(d.out.squeeze).toBe(0);
     expect(d.out.shimmer).toBe(0);
+  });
+
+  it("spreads the default 4000-bird flock wide enough to read as one large silhouette", () => {
+    const f = createFlock();
+    resizeFlock(f, HX, HY);
+    seedFlock(f, 4000, 1);
+    const c = createControls();
+    const p = createParamState();
+    resolveParams({ sky: "dusk", ink: "#ece6da", flock: "4000", speed: 1, falcon: true, reactivity: 1 }, "high", false, p);
+    const d = createDrive();
+    let mean = 0;
+    let samples = 0;
+    for (let i = 0; i < 720; i++) {
+      d.step(frame({ beatPhase: (i % 30) / 30 }), i * DT, DT, p, true, f, c, HX, HY);
+      stepFlock(f, c);
+      if (i < 360 || i % 30 !== 0) continue;
+      let sum = 0;
+      for (let j = 0; j < f.n; j++) sum += Math.hypot(f.px[j] - f.cx, f.py[j] - f.cy);
+      mean += sum / f.n;
+      samples++;
+    }
+    expect(mean / samples).toBeGreaterThan(0.34); // 0.29 at the earlier R0 0.75
   });
 
   it("starts a falcon strike on a strong onset, with an audio-accurate wave origin time", () => {

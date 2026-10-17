@@ -25,6 +25,7 @@ uniform float uDepthMix;
 
 varying vec3 vBary;
 varying vec4 vColor;
+varying float vPx; // on-screen bird length, drawing-buffer px
 
 float hash1(float n) {
   return fract(sin(n * 12.9898) * 43758.5453);
@@ -65,6 +66,7 @@ void main() {
   float size = uSize * uScale * (0.8 + 0.4 * hash1(id + 3.3)) * (1.0 + 0.6 * m);
   float onScreen = size * uPxPerUnit / max(-mv.z, 1e-3);
   size *= max(1.0, uMinPx / max(onScreen, 1e-4));
+  vPx = max(onScreen, uMinPx);
   mv.xy += (fwd * loc.x + side * loc.y) * size;
   gl_Position = projectionMatrix * mv;
 

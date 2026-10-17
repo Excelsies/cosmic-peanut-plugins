@@ -24,7 +24,7 @@ export const SEP_RADIUS = 0.055;
 /** Half-depth of the slab birds live in. */
 export const Z_HALF = 1.2;
 /** Bird length (world units). */
-export const BIRD_SIZE = 0.026;
+export const BIRD_SIZE = 0.03;
 
 const S2 = SEP_RADIUS * SEP_RADIUS;
 const W_SEP = 0.3;

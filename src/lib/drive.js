@@ -23,7 +23,7 @@ import { createSqueeze, createStriker, FALCON_DURATION, falconPosition, hash01, 
 import { createWaves, onsetTime } from "./wave.js";
 
 /** Flock radius (world units). */
-const R0 = 0.75;
+const R0 = 1.0;
 /** Chase speed of the pulled-toward point, × cruise. */
 const CHASE = 1.1;
 const COHESION = 0.3;

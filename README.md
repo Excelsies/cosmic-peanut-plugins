@@ -61,7 +61,8 @@ strike. A `three` visualizer.
   `addUpdateRange`, which allocates). The vertex shader builds the chevron in view space from
   position and heading, applies flap, roll and the wave, enforces a 1.5 CSS px minimum size from
   clip w and mixes far birds 25% toward the sky colour at their height; the fragment shader
-  softens the edges from a barycentric varying (no MSAA). The falcon is a second, solid crescent
+  softens the edges from a barycentric varying (no MSAA), with a coverage floor for birds under
+  about 4 px so they stay solid specks. The falcon is a second, solid crescent
   mesh three times the size.
 - **Transparency**: the sky is opaque; birds are premultiplied (`premultipliedAlpha`, normal
   blending), so with sky `none` they float over the desktop. Renderer state is left alone.
