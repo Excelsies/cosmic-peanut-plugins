@@ -1,19 +1,21 @@
 # Fieldwork
 
 Visualizers that each borrow a physical instrument or process and let the music run it, looking
-nothing like the built-ins: no glow, no centre object, no neon. A third-party-style Tidalviz
-package, same layout as `plugins/cosmic-peanut`: `tidalviz.json` at the root, entry modules in
-`src/` (Miura's and Kelir's in `src/<id>/`), pure logic with its tests in `src/lib/` (the first
-four and the shared helpers) or in the visualizer's own folder (`src/soapfilm/`, `src/isobar/`,
-`src/miura/lib/`, `src/kelir/lib/`), shaders in `shaders/<id>/`, thumbnails in `thumbs/`, and a byte copy of `web/sdk/tidalviz.d.ts`.
+nothing like the built-ins: no glow, no centre object, no neon. A third-party Tidalviz package
+for [Cosmic Peanut](https://github.com/cbuchert/cosmic-peanut): `tidalviz.json` at the root,
+entry modules in `src/` (Miura's and Kelir's in `src/<id>/`), pure logic with its tests in
+`src/lib/` (the first four and the shared helpers) or in the visualizer's own folder
+(`src/soapfilm/`, `src/isobar/`, `src/miura/lib/`, `src/kelir/lib/`), shaders in `shaders/<id>/`,
+thumbnails in `thumbs/`, the manifest's tests in `tests/`, and a byte copy of Cosmic Peanut's
+`web/sdk/tidalviz.d.ts`.
 Install it in the app with **Library → Add from URL** and `Excelsies/cosmic-peanut-plugins`
 (this package, published on its own with `tidalviz.json` at the repo root).
 
-Run it from source with hot reload:
+Run it from source with hot reload, from a Cosmic Peanut checkout:
 
 ```sh
-uv run --extra gtk tidalviz --dev plugins/fieldwork --source synthetic:demo   # Linux
-uv run tidalviz --dev plugins/fieldwork                                       # macOS
+uv run --extra gtk tidalviz --dev /path/to/cosmic-peanut-plugins --source synthetic:demo   # Linux
+uv run tidalviz --dev /path/to/cosmic-peanut-plugins                                       # macOS
 ```
 
 or add the folder in the app with **Library → Add dev folder…**.
@@ -787,7 +789,7 @@ the legs and a trailing drape, very long arms), not any particular character.
 General-purpose helpers, one copy each:
 
 - `flash.js` and `gl.js`: copies of the built-ins' photosensitivity limiter and WebGL2
-  helpers (repos can't import from each other); `copies.test.js` keeps them identical.
+  helpers (repos can't import from each other); `npm run check:host` keeps them identical.
 - `fixedstep.js`: the fixed-timestep clock every simulation except Soapfilm runs on, so 60 Hz and 120 Hz
   displays give the same result.
 - `stereo.js`: RMS balance (+1 = right) and width (1 − correlation), exactly 0 for mono or
@@ -811,9 +813,18 @@ General-purpose helpers, one copy each:
 
 ## Tests
 
+Node is a dev-time tool only; the app serves the modules as they are.
+
 ```sh
-cd web && npx vitest run --maxWorkers=2 ../plugins/fieldwork
-uv run pytest tests/test_builtin_manifests.py
+npm ci
+npm test                                        # vitest: every visualizer's logic, and tidalviz.json
+npm run typecheck                               # tsc --checkJs, strict
+npm run check:host -- /path/to/cosmic-peanut    # or COSMIC_PEANUT=/path/to/cosmic-peanut
 ```
+
+`three` resolves to the same three.js the app vendors (0.186.1), its types to `@types/three`.
+`check:host` needs a Cosmic Peanut checkout with `uv sync` done. It fails unless `tidalviz.d.ts`,
+`src/lib/gl.js` and `src/lib/flash.js` are byte copies of the host's (`web/sdk/tidalviz.d.ts`,
+`plugins/builtin/src/lib/`) and the host's own manifest loader accepts `tidalviz.json`.
 
 `frame()` allocates nothing in any of the visualizers.

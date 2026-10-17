@@ -1,0 +1,19 @@
+{
+  "name": "fieldwork",
+  "private": true,
+  "type": "module",
+  "description": "Dev-time tooling only. The visualizers are plain ES modules the app serves as-is.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json",
+    "check:host": "node scripts/check-host.js"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "@webgpu/types": "0.1.74",
+    "three": "0.186.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}
