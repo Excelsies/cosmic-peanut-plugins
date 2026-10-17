@@ -21,8 +21,8 @@
  * stream gives the same state at 60 and 120 Hz. Nothing here allocates after create.
  */
 import { hash01 } from "./hash.js";
-import { createMeter } from "./meter.js";
-import { stereoImage } from "./stereo.js";
+import { createBeatClock } from "./beatclock.js";
+import { createStereo, stereoFrame } from "./stereo.js";
 
 export const SLOTS = 7;
 export const MAX_LOWS = 4;
@@ -128,7 +128,8 @@ export function createPressure(aspect) {
     level: 1,
     midAttS: 0,
     balanceS: 0,
-    meter: createMeter(),
+    meter: createBeatClock(),
+    stereo: createStereo(),
     prevMeter: 0,
     // Separable Gaussian scratch for fillField.
     gx: new Float64Array(1024),
@@ -233,7 +234,9 @@ export function stepPressure(st, a, dt, prm) {
   st.prevMeter = m;
   st.beats += db;
 
-  st.balanceS += (stereoImage(a.left, a.right).balance - st.balanceS) * (1 - Math.exp(-dt / T_BALANCE));
+  // stereoFrame's balance is +1 for all right; here + means a louder left (the track goes north)
+  const left = -stereoFrame(a.left, a.right, st.stereo).balance;
+  st.balanceS += (left - st.balanceS) * (1 - Math.exp(-dt / T_BALANCE));
   st.midAttS += (a.midAtt - st.midAttS) * (1 - Math.exp(-dt / T_MID));
   st.level += ((a.silent ? 0 : 1) - st.level) * (1 - Math.exp(-dt / (a.silent ? T_FILL : T_RECOVER)));
 

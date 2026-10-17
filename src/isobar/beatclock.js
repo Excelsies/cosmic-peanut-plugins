@@ -5,7 +5,7 @@
  * 1 beat/s. It never runs backwards (small backwards jitter in `beatPhase` counts as no motion)
  * and stays continuous when the tempo appears or drops out. `step` allocates nothing.
  */
-export function createMeter() {
+export function createBeatClock() {
   let beats = 0;
   let lastPhase = -1;
   return {

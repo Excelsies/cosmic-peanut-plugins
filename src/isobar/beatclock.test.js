@@ -1,12 +1,12 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createMeter } from "./meter.js";
+import { createBeatClock } from "./beatclock.js";
 
 const DT = 1 / 60;
 
-describe("createMeter", () => {
+describe("createBeatClock", () => {
   it("counts beatPhase wraps into a continuous beat count", () => {
-    const m = createMeter();
+    const m = createBeatClock();
     let beats = 0;
     for (let i = 0; i <= 240; i++) {
       const t = i * DT;
@@ -16,14 +16,14 @@ describe("createMeter", () => {
   });
 
   it("runs a free clock at 1 beat/s when the tempo is unknown", () => {
-    const m = createMeter();
+    const m = createBeatClock();
     let beats = 0;
     for (let i = 0; i < 120; i++) beats = m.step(0, 0, DT);
     expect(beats).toBeCloseTo(2, 6);
   });
 
   it("never runs backwards and stays continuous when the tempo appears or drops out", () => {
-    const m = createMeter();
+    const m = createBeatClock();
     let prev = 0;
     for (let i = 0; i < 600; i++) {
       const t = i * DT;
@@ -36,7 +36,7 @@ describe("createMeter", () => {
   });
 
   it("treats a small backwards jitter in beatPhase as no motion", () => {
-    const m = createMeter();
+    const m = createBeatClock();
     m.step(120, 0.5, DT);
     const a = m.step(120, 0.52, DT);
     const b = m.step(120, 0.51, DT);
