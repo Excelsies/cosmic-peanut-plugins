@@ -14,7 +14,7 @@
  *   - Silence held 1.5 s: the puppets withdraw and the kayon stands at centre until a hit.
  * Distances: 0 = against the screen, 1 = far. Positions: fractions of the screen width.
  */
-import { createMeter } from "./meter.js";
+import { createBeatClock } from "../../lib/beatclock.js";
 import { stereoImage } from "./stereo.js";
 
 export const PUPPET_REST = 0.55;
@@ -93,7 +93,7 @@ function createSilhouette() {
  */
 
 export function createStage() {
-  const meter = createMeter();
+  const meter = createBeatClock();
   const sil = [createSilhouette(), createSilhouette(), createSilhouette()];
   // Lunge starts (s, on the frame clock), adjusted so a retrigger continues from the current level.
   const lungeAt = [-1e9, -1e9, -1e9];

@@ -4,7 +4,7 @@
  * the north-west corner, land where it reaches 0.58. Sampled in chart space, so the continent is
  * the same at every window size. Used only when the base canvas is rebuilt (resize, chart change).
  */
-import { hash01 } from "./hash.js";
+import { hash01 } from "../lib/hash.js";
 
 export const LAND = 0.58;
 const TABLE = 256;

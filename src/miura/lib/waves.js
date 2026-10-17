@@ -13,7 +13,7 @@
  *
  * Nothing allocates after createWaves.
  */
-import { hash01 } from "./hash.js";
+import { hash01 } from "../../lib/hash.js";
 
 export const MAX_WAVES = 8;
 /** Waves older than this (s) are skipped. */

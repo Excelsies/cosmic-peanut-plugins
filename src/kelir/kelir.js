@@ -20,7 +20,7 @@
  * (shaders/kelir/mask.frag); a full-screen composite lays it over the lit screen
  * (shaders/kelir/composite.frag). frame() allocates nothing.
  */
-import { createProgram } from "./lib/gl.js";
+import { createProgram } from "../lib/gl.js";
 import { resolveParams } from "./lib/kelir-params.js";
 import { createLamp } from "./lib/lamp.js";
 import { placeSilhouette } from "./lib/place.js";

@@ -4,9 +4,9 @@
  * and when the light swings round. Everything is exponential or analytic in time, so it is the
  * same at 60 and 120 Hz, and nothing allocates after the create calls.
  */
-import { createFlashLimiter } from "./flash.js";
-import { hash01 } from "./hash.js";
-import { createMeter } from "./meter.js";
+import { createFlashLimiter } from "../../lib/flash.js";
+import { hash01 } from "../../lib/hash.js";
+import { createBeatClock } from "../../lib/beatclock.js";
 
 /**
  * One step of an exponential follower with time constant `tau` (s), frame-rate independent.
@@ -86,7 +86,7 @@ export const headingFor = (k) => 70 + 130 * hash01(k);
  * bar while the tempo is unknown) it eases to the next heading of a fixed sequence over 4 s.
  */
 export function createSweep() {
-  const meter = createMeter();
+  const meter = createBeatClock();
   let lastBeats = 0;
   let phrase = 0;
   let turn = 0;

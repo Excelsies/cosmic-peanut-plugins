@@ -13,7 +13,7 @@
  * - left/right → `tilt` of the bands, ±4 degrees toward the louder side; exactly 0 for mono.
  * Silence: membrane and shimmer fall to 0, swirl to its floor; the centroid angle holds.
  */
-import { createFlashLimiter } from "./flash.js";
+import { createFlashLimiter } from "../lib/flash.js";
 import { stereoImage } from "./stereo.js";
 
 const TILT_MAX = (4 * Math.PI) / 180;

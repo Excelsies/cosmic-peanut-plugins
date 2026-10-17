@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createMeter } from "./meter.js";
+import { createBeatClock } from "../lib/beatclock.js";
 import { createRedip, WIPE_SECONDS } from "./redip.js";
 
 const DT = 1 / 60;
@@ -11,7 +11,7 @@ const DT = 1 / 60;
  */
 function run({ seconds, bpm, mode, drain = 1, age = 0 }) {
   const r = createRedip(age);
-  const meter = createMeter();
+  const meter = createBeatClock();
   /** @type {{ t: number, beats: number }[]} */
   const dips = [];
   for (let n = 1; n * DT <= seconds + 1e-9; n++) {

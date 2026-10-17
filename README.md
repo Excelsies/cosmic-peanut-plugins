@@ -442,7 +442,7 @@ over 1.2 s. A hairline wire frames the window. Renderer: `webgl2`.
   swirl·(0.01 + 0.05·clamp(loud − 0.6, 0, 1.4) + 0.06·flux) uv/s; trebAtt → 8 nm·clamp(trebAtt −
   1, 0, 2) shimmer; centroid (τ 1.5 s) → angle of incidence 5–45 degrees (hue shift); stereo
   balance (τ 0.5 s, `stereo.js`, exactly 0 for mono or bit-identical L/R) → ±4 degree tilt toward
-  the louder side; bpm and beatPhase → the beat count (`meter.js`) for re-dips.
+  the louder side; bpm and beatPhase → the beat count (`lib/beatclock.js`) for re-dips.
 - **Re-dip** (`redip.js`): on every 16th (or 32nd) bar, whenever coverage passes 45%, or every
   40 s without a tempo, at least 8 s apart. The wipe front rises from the bottom over 1.2 s
   (ease-in-out cubic); below it the film is new, above it the old film keeps draining, and the
@@ -793,12 +793,17 @@ General-purpose helpers, one copy each:
 - `meter.js`: a beat counter on the host's `beatPhase` that ignores tempo-tracker jitter
   (Plotter's phrases, Misregister's re-layouts).
 - `beatclock.js`: a continuous clock in beats that runs free at 1 beat/s without a tempo
-  (Murmuration's sweep).
+  (Murmuration's sweep, and the beat counts of Soapfilm, Miura, Isobar and Kelir).
+- `hash.js`: a deterministic hash of an integer to [0, 1), so runs never need `Math.random`.
 - `chroma.js`: per-frame pitch-class profile normalised to its peak, with major-third
   damping (Misregister's swells).
 - `harmonic-chroma.js`: a 2 s smoothed pitch-class profile that damps the 3rd, 5th and
   6th harmonics of stronger lower peaks, so the two strongest classes are a real interval
   (Plotter's figures).
+
+Two helpers of the second four are not these: Soapfilm's `fixedstep.js` returns
+`{ steps, alpha }`, and the `stereo.js` that Soapfilm, Miura and Kelir each carry measures
+balance as +1 = left and width from the RMS of L − R. They stay in those visualizers' folders.
 
 ## Tests
 

@@ -20,9 +20,9 @@
  * All envelopes are exponential in dt and every decision happens on a frame, so the same beat
  * stream gives the same state at 60 and 120 Hz. Nothing here allocates after create.
  */
-import { hash01 } from "./hash.js";
-import { createBeatClock } from "./beatclock.js";
-import { createStereo, stereoFrame } from "./stereo.js";
+import { hash01 } from "../lib/hash.js";
+import { createBeatClock } from "../lib/beatclock.js";
+import { createStereo, stereoFrame } from "../lib/stereo.js";
 
 export const SLOTS = 7;
 export const MAX_LOWS = 4;

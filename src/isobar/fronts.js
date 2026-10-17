@@ -16,7 +16,7 @@
  * behind the cold front and ahead of the warm one, keyed to the arc length so it travels with the
  * front. Nothing here allocates after createFronts.
  */
-import { hash01 } from "./hash.js";
+import { hash01 } from "../lib/hash.js";
 import { LOW_LIFE, MAX_LOWS } from "./pressure.js";
 
 export const OCCLUDED = 0;

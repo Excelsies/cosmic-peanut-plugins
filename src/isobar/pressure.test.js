@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { hash01 } from "./hash.js";
+import { hash01 } from "../lib/hash.js";
 import {
   backgroundAt,
   BASE_P,

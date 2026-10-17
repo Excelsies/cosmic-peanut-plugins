@@ -10,7 +10,7 @@
  * the live plumes into `uniforms` (vec4[6]: x, y, r, rise; zeros when dead) and `src` (film
  * emission, microns per second, during the first 0.8 s). Nothing here allocates after create.
  */
-import { hash01 } from "./hash.js";
+import { hash01 } from "../lib/hash.js";
 
 export const MAX_PLUMES = 6;
 /** Onsets weaker than this send no plume. */

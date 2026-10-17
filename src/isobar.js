@@ -20,7 +20,7 @@ import { addBarb, clearBarbs, createBarbs, MAX_STATIONS, pathBarbs, stationGrid,
 import { CHART_STYLES } from "./isobar/chart.js";
 import { coastSegments, createCoast, LAND, landAt } from "./isobar/coast.js";
 import { contour, createContours, pathSegments } from "./isobar/contour.js";
-import { createFlashLimiter } from "./isobar/flash.js";
+import { createFlashLimiter } from "./lib/flash.js";
 import {
   buildFronts,
   createFronts,

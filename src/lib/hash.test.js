@@ -13,4 +13,5 @@ it("hash01 is deterministic, in [0, 1) and spread out", () => {
   }
   expect(sum / 1000).toBeGreaterThan(0.45);
   expect(sum / 1000).toBeLessThan(0.55);
+  expect(hash01(1)).not.toBe(hash01(2));
 });

@@ -4,7 +4,7 @@
  * plain paper with a faint grain and about a hundred long, gently curving darker fibres (hashed,
  * so it is the same every time). Built once at create.
  */
-import { hash01 } from "./hash.js";
+import { hash01 } from "../../lib/hash.js";
 
 export const FIBRE_SIZE = 256;
 const FIBRES = 90;

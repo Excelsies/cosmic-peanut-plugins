@@ -25,8 +25,8 @@
 import { createDrive } from "./soapfilm/drive.js";
 import { blackFront } from "./soapfilm/film.js";
 import { createFixedStep } from "./soapfilm/fixedstep.js";
-import { createProgram, createTarget } from "./soapfilm/gl.js";
-import { createMeter } from "./soapfilm/meter.js";
+import { createProgram, createTarget } from "./lib/gl.js";
+import { createBeatClock } from "./lib/beatclock.js";
 import { createPlumes } from "./soapfilm/plumes.js";
 import { createRedip } from "./soapfilm/redip.js";
 import { createParams, resolveParams } from "./soapfilm/soapfilm-params.js";
@@ -92,7 +92,7 @@ export default async function create(ctx) {
   const drive = createDrive();
   const plumes = createPlumes();
   const redip = createRedip(INITIAL_AGE);
-  const meter = createMeter();
+  const meter = createBeatClock();
   const clock = createFixedStep(1 / 60, 4);
   const STEP = 1 / 60;
   const relaxD = Math.exp(-STEP / 4);

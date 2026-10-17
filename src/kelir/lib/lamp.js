@@ -7,8 +7,8 @@
  * screen) and dims the whole screen by at most MAX_DIP, through the flash limiter.
  * `step` allocates nothing.
  */
-import { createFlashLimiter } from "./flash.js";
-import { hash01 } from "./hash.js";
+import { createFlashLimiter } from "../../lib/flash.js";
+import { hash01 } from "../../lib/hash.js";
 
 /** The screen never dims by more than this (a 5% wobble). */
 export const MAX_DIP = 0.05;
