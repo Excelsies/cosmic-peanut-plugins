@@ -162,7 +162,7 @@ export default async function create(ctx) {
       const kicked = kick.step(audio, dt);
       pitch.setSampleRate(audio.sampleRate);
       const midi = audio.silent ? NaN : pitch.midi(audio.spectrum);
-      fade.switchTo(gate.step(midi, dt, res.complexity), res.reduceMotion);
+      fade.switchTo(gate.step(midi, audio.onset, dt, res.complexity), res.reduceMotion);
       fade.step(dt);
       // sand.js takes +1 = left heavy; stereo.js gives +1 = right heavy.
       const balance = -stereoFrame(audio.left, audio.right, stereo).balance;

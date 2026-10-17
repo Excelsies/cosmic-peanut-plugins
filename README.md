@@ -67,10 +67,9 @@ figure where it lies. Renderer: `webgl2`.
 - **Pitch** (`pitch.js`): the strongest bin between 200 Hz and 2 kHz with magnitude > 0.08 and
   more than 3× the window mean, refined by parabolic interpolation of the log magnitude, gives a
   midi note; index = clamp(floor((midi − 55)·0.72·complexity), 0, 31). A new index must hold for
-  0.2 s of summed `dt`, so the figure follows every note of 0.2 s or longer, 0.2 s after it
-  starts. Onsets play no part: a hat or kick with a stray partial can't flip the figure. Silence
-  and atonal input hold the figure. It starts on index 6, so drums alone still draw a figure. The
-  bin window is rebuilt only when the sample rate changes.
+  0.2 s of summed `dt` (an onset switches at once, so plucked notes change the figure on their
+  attack); silence and atonal input hold the figure. It starts on index 6, so drums alone still
+  draw a figure. The bin window is rebuilt only when the sample rate changes.
 - **Kicks** (`kick.js`): an onset whose `bass` reaches 1.6× its pre-onset level within 50 ms,
   with `treb` rising at most 2× as much as the bass (levels floored at 0.15). The host's `onset`
   fires on any transient; this keeps the kicks. A kick under a loud hat (the treble rising more
@@ -105,8 +104,7 @@ figure where it lies. Renderer: `webgl2`.
 - **Reduce flashing** (on by default): hops are at most 2.5 per second by design (0.4 s gap),
   with Reduce flashing on or off. The haze envelope still goes through the photosensitivity
   limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second) as a
-  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts, and at least
-  0.2 s apart.
+  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts.
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
   reactivity 0.5, hops at half height and the bass tilt is off.
 

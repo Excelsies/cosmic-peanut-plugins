@@ -2,8 +2,8 @@
 /**
  * Pitch → Chladni figure. The strongest clear partial between 200 Hz and 2 kHz picks a mode table
  * index: higher notes, finer figures. A note must hold for 0.2 s of audio time before the figure
- * changes, and silence or atonal input holds the last figure. Onsets play no part: kicks and hats
- * with a stray partial must not flip the figure. All of it allocates nothing per frame.
+ * changes (an onset with a clear note changes it at once), and silence or atonal input holds the
+ * last figure. All of it allocates nothing per frame.
  */
 
 const F_LO = 200;
@@ -76,10 +76,10 @@ export function candidateIndex(midi, complexity) {
 }
 
 /**
- * Debounces candidates into the target mode. A candidate replaces the target once it has held for
- * HOLD seconds (summed dt, so frame-rate independent), so the figure follows each note that lasts
- * 0.2 s or more, HOLD after it starts, and switches are at least HOLD apart. NaN (no clear note)
- * holds the target and restarts the hold.
+ * Debounces candidates into the target mode. A candidate replaces the target at once on an onset
+ * frame, so plucked notes whose pitch reads clearly for only a few frames still show their figure
+ * on the attack, or once it has held for HOLD seconds (summed dt, so frame-rate independent). NaN
+ * (no clear note) holds the target and restarts the hold.
  * @param {number} start initial target index
  */
 export function createModeGate(start) {
@@ -89,11 +89,12 @@ export function createModeGate(start) {
   return {
     /**
      * @param {number} midi from createPitch().midi, NaN for none
+     * @param {boolean} onset
      * @param {number} dt seconds
      * @param {number} complexity
      * @returns {number} the target mode index
      */
-    step(midi, dt, complexity) {
+    step(midi, onset, dt, complexity) {
       if (Number.isNaN(midi)) {
         candidate = -1;
         held = 0;
@@ -106,7 +107,7 @@ export function createModeGate(start) {
       } else {
         held += dt;
       }
-      if (held >= HOLD - 1e-9) target = c;
+      if (onset || held >= HOLD - 1e-9) target = c;
       return target;
     },
   };

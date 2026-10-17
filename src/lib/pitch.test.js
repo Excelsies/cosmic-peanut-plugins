@@ -57,64 +57,90 @@ describe("candidateIndex", () => {
 describe("createModeGate", () => {
   /**
    * First frame on which the gate reports `want`, or -1.
-   * @param {(i: number) => number} midiAt @param {number} hz @param {number} want
+   * @param {(i: number) => number} midiAt @param {(i: number) => boolean} onsetAt @param {number} hz @param {number} want
    */
-  function switchFrame(midiAt, hz, want, frames = 4 * hz) {
+  function switchFrame(midiAt, onsetAt, hz, want, frames = 4 * hz) {
     const g = createModeGate(6);
-    for (let i = 0; i < frames; i++) if (g.step(midiAt(i), 1 / hz, 1) === want) return i;
+    for (let i = 0; i < frames; i++) if (g.step(midiAt(i), onsetAt(i), 1 / hz, 1) === want) return i;
     return -1;
   }
+  const never = () => false;
 
-  it("starts on mode 6 and holds it through silence and atonal input", () => {
+  it("starts on mode 6 and holds it through silence and atonal input, onsets or not", () => {
     const g = createModeGate(6);
-    for (let i = 0; i < 120; i++) expect(g.step(NaN, 1 / 60, 1)).toBe(6);
+    for (let i = 0; i < 120; i++) expect(g.step(NaN, i % 15 === 0, 1 / 60, 1)).toBe(6);
   });
 
   it("switches once a candidate has held 0.2 s, at the same audio time at 60 Hz and 120 Hz", () => {
     expect(HOLD).toBe(0.2);
-    expect(switchFrame(() => 69, 60, 10)).toBe(12);
-    expect(switchFrame(() => 69, 120, 10)).toBe(24);
+    expect(switchFrame(() => 69, never, 60, 10)).toBe(12);
+    expect(switchFrame(() => 69, never, 120, 10)).toBe(24);
   });
 
-  it("does not switch on a candidate that keeps changing", () => {
+  it("switches at once on an onset with a clear note, and holds the figure through NaN", () => {
     const g = createModeGate(6);
-    for (let i = 0; i < 120; i++) expect(g.step(i % 10 < 5 ? 69 : 72, 1 / 60, 1)).toBe(6);
+    expect(g.step(69, true, 1 / 60, 1)).toBe(10);
+    expect(g.step(NaN, true, 1 / 60, 1)).toBe(10);
+  });
+
+  it("does not switch on a candidate that keeps changing without onsets", () => {
+    const g = createModeGate(6);
+    for (let i = 0; i < 120; i++) expect(g.step(i % 10 < 5 ? 69 : 72, false, 1 / 60, 1)).toBe(6);
   });
 
   it("restarts the hold when the note drops out", () => {
     const g = createModeGate(6);
-    for (let i = 0; i < 11; i++) expect(g.step(69, 1 / 60, 1)).toBe(6);
-    expect(g.step(NaN, 1 / 60, 1)).toBe(6);
-    for (let i = 0; i < 12; i++) expect(g.step(69, 1 / 60, 1)).toBe(6);
-    expect(g.step(69, 1 / 60, 1)).toBe(10);
-    expect(g.step(NaN, 1 / 60, 1)).toBe(10);
+    for (let i = 0; i < 11; i++) expect(g.step(69, false, 1 / 60, 1)).toBe(6);
+    expect(g.step(NaN, false, 1 / 60, 1)).toBe(6);
+    for (let i = 0; i < 12; i++) expect(g.step(69, false, 1 / 60, 1)).toBe(6);
+    expect(g.step(69, false, 1 / 60, 1)).toBe(10);
   });
 
-  // Melodies that move on every beat or every 8th: the figure must follow the note that is
-  // sounding, HOLD after it starts, whether the pitch reads a couple of frames before or after
-  // the beat. Indices alternate 10 / 12 / 15 (midi 69 / 72 / 76).
+  // Plucked notes, as in the harness's melody: the pitch reads clearly for 3 frames after the
+  // attack (an onset), then fades to no clear note. The figure follows each pluck on its attack.
+  it("follows plucked 8th notes at 120 bpm on their attacks", () => {
+    const g = createModeGate(6);
+    const notes = [69, 72, 76];
+    const idx = [10, 12, 15];
+    for (let i = 0; i < 6 * 60; i++) {
+      const n = Math.floor(i / 15);
+      const j = i % 15;
+      expect(g.step(j < 3 ? notes[n % 3] : NaN, j === 0, 1 / 60, 1)).toBe(idx[n % 3]);
+    }
+  });
+
+  // Sustained melodies that move on every beat or every 8th: the figure follows the note that is
+  // sounding, at once when the attack is an onset whose frame already reads the new pitch, and
+  // HOLD after the note starts when the pitch reads after the onset (or there is none).
+  // Indices cycle 10 / 12 / 15 (midi 69 / 72 / 76).
   for (const [label, noteSecs] of /** @type {const} */ ([
     ["quarter notes at 100 bpm", 0.6],
     ["quarter notes at 120 bpm", 0.5],
     ["8th notes at 90 bpm", 1 / 3],
   ])) {
-    for (const shift of [-2, 2]) {
-      it(`follows ${label} with the pitch ${Math.abs(shift)} frames ${shift < 0 ? "before" : "after"} the beat`, () => {
+    for (const [shift, onsets, when] of /** @type {const} */ ([
+      [0, true, "with an onset on the attack"],
+      [-2, false, "2 frames before the beat, no onset"],
+      [2, true, "2 frames after the onset"],
+    ])) {
+      it(`follows ${label}, pitch ${when}`, () => {
         const hz = 60;
         const notes = [69, 72, 76];
         const idx = [10, 12, 15];
         const g = createModeGate(6);
-        const lag = Math.round(HOLD * hz);
+        const lag = shift === 0 ? 0 : Math.round(HOLD * hz);
         let checked = 0;
         for (let i = 0; i < 6 * hz; i++) {
-          const t = (i - 30 - shift) / hz; // half a second of no note first
+          const beatT = (i - 30) / hz; // half a second of no note first
+          const onset = onsets && beatT >= 0 && Math.abs(beatT / noteSecs - Math.round(beatT / noteSecs)) * noteSecs * hz < 0.5;
+          const t = (i - 30 - shift) / hz;
           if (t < 0) {
-            expect(g.step(NaN, 1 / hz, 1)).toBe(6);
+            expect(g.step(NaN, onset, 1 / hz, 1)).toBe(6);
             continue;
           }
           const n = Math.floor(t / noteSecs + 1e-9);
           const start = Math.round(n * noteSecs * hz) + 30 + shift;
-          const got = g.step(notes[n % 3], 1 / hz, 1);
+          const got = g.step(notes[n % 3], onset, 1 / hz, 1);
           if (i >= start + lag) {
             expect(got).toBe(idx[n % 3]);
             checked++;
