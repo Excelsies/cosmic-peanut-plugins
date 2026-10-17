@@ -86,7 +86,7 @@ export const headingFor = (k) => 70 + 130 * hash01(k);
  * bar while the tempo is unknown) it eases to the next heading of a fixed sequence over 4 s.
  */
 export function createSweep() {
-  const meter = createBeatClock();
+  const beatClock = createBeatClock();
   let lastBeats = 0;
   let phrase = 0;
   let turn = 0;
@@ -101,7 +101,7 @@ export function createSweep() {
      * @returns {number} heading in degrees
      */
     step(bpm, beatPhase, dt, barsPerTurn) {
-      const beats = meter.step(bpm, beatPhase, dt);
+      const beats = beatClock.step(bpm, beatPhase, dt);
       const d = beats - lastBeats;
       lastBeats = beats;
       phrase += bpm > 0 ? d / (4 * barsPerTurn) : dt / (2 * barsPerTurn);

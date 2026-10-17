@@ -1,7 +1,7 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
 import { createWaves, MAX_ONSET_AGE, MAX_WAVES, WAVE_LIFE, waveOriginX } from "./waves.js";
-import { stereoImage } from "./stereo.js";
+import { stereoImage } from "../../lib/stereo-image.js";
 
 /** A minimal audio-like record for `onset`. */
 const hit = (strength = 1, age = 0, silent = false) => ({ onset: true, onsetStrength: strength, onsetAge: age, silent });

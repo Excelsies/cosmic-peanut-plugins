@@ -133,9 +133,9 @@ export function createPressure(aspect) {
     level: 1,
     midAttS: 0,
     balanceS: 0,
-    meter: createBeatClock(),
+    beatClock: createBeatClock(),
     stereo: createStereo(),
-    prevMeter: 0,
+    prevBeats: 0,
     // Separable Gaussian scratch for fillField.
     gx: new Float64Array(1024),
     gy: new Float64Array(1024),
@@ -239,9 +239,9 @@ function spawnLow(st) {
  * @param {{ reactivity: number, speedEff: number, pulseEff: number }} prm
  */
 export function stepPressure(st, a, dt, prm) {
-  const m = st.meter.step(a.bpm, a.beatPhase, dt);
-  const db = a.silent ? 0 : Math.max(0, m - st.prevMeter);
-  st.prevMeter = m;
+  const m = st.beatClock.step(a.bpm, a.beatPhase, dt);
+  const db = a.silent ? 0 : Math.max(0, m - st.prevBeats);
+  st.prevBeats = m;
   st.beats += db;
 
   // stereoFrame's balance is +1 for all right; here + means a louder left (the track goes north)

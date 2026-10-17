@@ -11,12 +11,12 @@ const DT = 1 / 60;
  */
 function run({ seconds, bpm, mode, drain = 1, age = 0 }) {
   const r = createRedip(age);
-  const meter = createBeatClock();
+  const beatClock = createBeatClock();
   /** @type {{ t: number, beats: number }[]} */
   const dips = [];
   for (let n = 1; n * DT <= seconds + 1e-9; n++) {
     const t = n * DT;
-    const beats = meter.step(bpm, bpm > 0 ? (t * bpm / 60) % 1 : 0, DT);
+    const beats = beatClock.step(bpm, bpm > 0 ? (t * bpm / 60) % 1 : 0, DT);
     if (r.step(DT, drain, beats, bpm, mode)) dips.push({ t, beats });
   }
   return { r, dips };

@@ -3,9 +3,9 @@
 Visualizers that each borrow a physical instrument or process and let the music run it, looking
 nothing like the built-ins: no glow, no centre object, no neon. A third-party-style Tidalviz
 package, same layout as `plugins/cosmic-peanut`: `tidalviz.json` at the root, entry modules in
-`src/`, pure logic with its tests in `src/lib/` (the first four and the shared helpers) or in
-the visualizer's own folder (`src/soapfilm/`, `src/miura/`, `src/isobar/`, `src/kelir/`),
-shaders in `shaders/<id>/`, thumbnails in `thumbs/`, and a byte copy of `web/sdk/tidalviz.d.ts`.
+`src/` (Miura's and Kelir's in `src/<id>/`), pure logic with its tests in `src/lib/` (the first
+four and the shared helpers) or in the visualizer's own folder (`src/soapfilm/`, `src/isobar/`,
+`src/miura/lib/`, `src/kelir/lib/`), shaders in `shaders/<id>/`, thumbnails in `thumbs/`, and a byte copy of `web/sdk/tidalviz.d.ts`.
 Run it from source with hot reload:
 
 ```sh
@@ -85,7 +85,7 @@ figure where it lies. Renderer: `webgl2`.
   lighter and softer with a small offset shadow. The plate (gradient, anisotropic hash brushing,
   sheen) never reacts to audio.
 
-### Flashing and motion
+### Accessibility
 
 - **Reduce flashing** (on by default): every hop asks the photosensitivity limiter
   (`lib/flash.js`, a copy of the built-in one) for a rise of the dust-haze envelope; only an
@@ -339,7 +339,7 @@ neighbouring region it sits next to (C and G tint with plate 2, D and A with pla
    alpha = 1 − ∏(1 − coverage) and premultiplied rgb = tone − (1 − alpha), so over white it
    matches the white-paper print and over black only the ink shows.
 
-### Photosensitivity and motion
+### Accessibility
 
 - **Reduce flashing** (on by default): on opaque paper the total ink is what changes the mean
   brightness, so one global gain over every swell and dot swell goes through the flash limiter
@@ -441,7 +441,7 @@ over 1.2 s. A hairline wire frames the window. Renderer: `webgl2`.
   mode (1,1) into (1,2); loudness rms(0.5 s)/rms(20 s) and flux (τ 0.3 s) set the swirl,
   swirl·(0.01 + 0.05·clamp(loud − 0.6, 0, 1.4) + 0.06·flux) uv/s; trebAtt → 8 nm·clamp(trebAtt −
   1, 0, 2) shimmer; centroid (τ 1.5 s) → angle of incidence 5–45 degrees (hue shift); stereo
-  balance (τ 0.5 s, `stereo.js`, exactly 0 for mono or bit-identical L/R) → ±4 degree tilt toward
+  balance (τ 0.5 s, `lib/stereo-image.js`, exactly 0 for mono or bit-identical L/R) → ±4 degree tilt toward
   the louder side; bpm and beatPhase → the beat count (`lib/beatclock.js`) for re-dips.
 - **Re-dip** (`redip.js`): on every 16th (or 32nd) bar, whenever coverage passes 45%, or every
   40 s without a tempo, at least 8 s apart. The wipe front rises from the bottom over 1.2 s
@@ -451,7 +451,7 @@ over 1.2 s. A hairline wire frames the window. Renderer: `webgl2`.
 `frame()` allocates nothing: every uniform comes from preallocated `Float32Array`s and scalars,
 there are no closures, literals or string building per frame, and no `Math.random`.
 
-### Reduce motion and flashing
+### Accessibility
 
 - **Reduce flashing** (on by default): the bass membrane goes through the flash limiter (at most
   3 rises per second; a unit test drives a 10 Hz bass strobe), and the shimmer moves at 3 Hz
@@ -654,7 +654,7 @@ widths are measured once in create, because `measureText` returns a new object. 
 closures, literals or string building per frame and no `Math.random`, so harness stills are
 deterministic.
 
-### Reduce motion and flashing
+### Accessibility
 
 - The chart is line art on a steady background: kicks move lines and never flash. The only area
   changes, the tint and the rain, ramp over 1–2 s, and the tint also passes through the flash
@@ -785,10 +785,12 @@ General-purpose helpers, one copy each:
 
 - `flash.js` and `gl.js`: copies of the built-ins' photosensitivity limiter and WebGL2
   helpers (repos can't import from each other); `copies.test.js` keeps them identical.
-- `fixedstep.js`: the fixed-timestep clock every simulation runs on, so 60 Hz and 120 Hz
+- `fixedstep.js`: the fixed-timestep clock every simulation except Soapfilm runs on, so 60 Hz and 120 Hz
   displays give the same result.
 - `stereo.js`: RMS balance (+1 = right) and width (1 − correlation), exactly 0 for mono or
   bit-identical channels such as `synthetic:demo`.
+- `stereo-image.js`: RMS balance with +1 = left and width from the RMS of L − R, exactly 0 for
+  mono or bit-identical channels (Soapfilm's, Miura's and Kelir's stereo drift).
 - `color.js`: `#rrggbb` param parsing with a fallback.
 - `meter.js`: a beat counter on the host's `beatPhase` that ignores tempo-tracker jitter
   (Plotter's phrases, Misregister's re-layouts).
@@ -801,9 +803,8 @@ General-purpose helpers, one copy each:
   6th harmonics of stronger lower peaks, so the two strongest classes are a real interval
   (Plotter's figures).
 
-Two helpers of the second four are not these: Soapfilm's `fixedstep.js` returns
-`{ steps, alpha }`, and the `stereo.js` that Soapfilm, Miura and Kelir each carry measures
-balance as +1 = left and width from the RMS of L − R. They stay in those visualizers' folders.
+`stereo-image.js` is not `stereo.js` because its sign and width differ. Soapfilm keeps its own
+`fixedstep.js` in `src/soapfilm/`, since it returns `{ steps, alpha }`.
 
 ## Tests
 

@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { stereoImage } from "./stereo.js";
+import { stereoImage } from "./stereo-image.js";
 
 const N = 2048;
 const sine = (/** @type {number} */ a) => Float32Array.from({ length: N }, (_, i) => a * Math.sin(i * 0.05));

@@ -92,7 +92,7 @@ export default async function create(ctx) {
   const drive = createDrive();
   const plumes = createPlumes();
   const redip = createRedip(INITIAL_AGE);
-  const meter = createBeatClock();
+  const beatClock = createBeatClock();
   const clock = createFixedStep(1 / 60, 4);
   const STEP = 1 / 60;
   const relaxD = Math.exp(-STEP / 4);
@@ -107,7 +107,7 @@ export default async function create(ctx) {
         resolveParams(ctx.params, reduceMotion, p);
       }
       drive.step(audio, dt, p, ctx.reduceFlashing);
-      const beats = meter.step(audio.bpm, audio.beatPhase, dt);
+      const beats = beatClock.step(audio.bpm, audio.beatPhase, dt);
       redip.step(dt, p.drainEff, beats, audio.bpm, p.redip);
       plumes.step(audio, time.now, drive.balance);
       plumes.update(time.now, blackFront(redip.age), p.riseEff, p.reactivity);

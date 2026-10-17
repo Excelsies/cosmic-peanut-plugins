@@ -38,7 +38,7 @@ import {
   writeLayout,
 } from "./lib/miura.js";
 import { effectiveMotion, resolveParams } from "./lib/miura-params.js";
-import { stereoImage } from "./lib/stereo.js";
+import { stereoImage } from "../lib/stereo-image.js";
 import { createWaves } from "./lib/waves.js";
 
 /** @typedef {{ color: number, rough: number, metal: number, fibres: boolean, rim: number }} Paper */

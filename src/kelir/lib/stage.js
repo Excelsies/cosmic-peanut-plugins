@@ -15,7 +15,7 @@
  * Distances: 0 = against the screen, 1 = far. Positions: fractions of the screen width.
  */
 import { createBeatClock } from "../../lib/beatclock.js";
-import { stereoImage } from "./stereo.js";
+import { stereoImage } from "../../lib/stereo-image.js";
 
 export const PUPPET_REST = 0.55;
 /** The back arm at rest (quiet mids): shoulder swung back, elbow bent forward, radians. */
@@ -93,7 +93,7 @@ function createSilhouette() {
  */
 
 export function createStage() {
-  const meter = createBeatClock();
+  const beatClock = createBeatClock();
   const sil = [createSilhouette(), createSilhouette(), createSilhouette()];
   // Lunge starts (s, on the frame clock), adjusted so a retrigger continues from the current level.
   const lungeAt = [-1e9, -1e9, -1e9];
@@ -133,7 +133,7 @@ export function createStage() {
      */
     step(audio, now, dt, p) {
       const prevBeats = beats;
-      beats = meter.step(finite(audio.bpm), finite(audio.beatPhase), dt);
+      beats = beatClock.step(finite(audio.bpm), finite(audio.beatPhase), dt);
       centroidS += (clamp01(finite(audio.centroid)) - centroidS) * smooth(dt, 0.25);
       midAttS += (finite(audio.midAtt) - midAttS) * smooth(dt, 0.3);
       const st = stereoImage(audio.left, audio.right);

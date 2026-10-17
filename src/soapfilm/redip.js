@@ -50,7 +50,7 @@ export function createRedip(initialAge) {
     /**
      * @param {number} dt seconds
      * @param {number} drainEff effective drainage (film ages at dt × drainEff)
-     * @param {number} beats continuous beat count (meter.js)
+     * @param {number} beats continuous beat count (lib/beatclock.js)
      * @param {number} bpm 0 = no tempo
      * @param {number} mode Re-dip option index: 0 = 16 bars, 1 = 32 bars, 2 = when black
      * @returns {boolean} true when a re-dip started on this step

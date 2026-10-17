@@ -14,7 +14,7 @@
  * Silence: membrane and shimmer fall to 0, swirl to its floor; the centroid angle holds.
  */
 import { createFlashLimiter } from "../lib/flash.js";
-import { stereoImage } from "./stereo.js";
+import { stereoImage } from "../lib/stereo-image.js";
 
 const TILT_MAX = (4 * Math.PI) / 180;
 const PHASE_WRAP = 4096;
