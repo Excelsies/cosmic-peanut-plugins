@@ -16,6 +16,7 @@ import {
   S_HAT_DB,
   W_HI,
   W_LO,
+  W_RISE,
   WEIGHT_WIN,
   Z,
   Z_FLOOR,
@@ -141,8 +142,8 @@ function setFrames(fr, k, n, set) {
 
 describe("hits constants", () => {
   it("exports the tuned constants", () => {
-    expect([FLUX_SPAN, HIST, Z_FLOOR, Z, FLUX_MIN, A_STRONG, A_AGE, S_HAT_DB, C_MIN, REFRACTORY, WEIGHT_WIN, W_LO, W_HI]).toEqual([
-      0.035, 2, 0.5, 3, 3, 6, 0.03, -3, 0.6, 0.1, 0.043, -28, -10,
+    expect([FLUX_SPAN, HIST, Z_FLOOR, Z, FLUX_MIN, A_STRONG, A_AGE, S_HAT_DB, C_MIN, REFRACTORY, WEIGHT_WIN, W_LO, W_HI, W_RISE]).toEqual([
+      0.035, 2, 0.5, 3, 3, 6, 0.03, -3, 0.6, 0.07, 0.043, -28, -10, 4,
     ]);
   });
 
@@ -182,7 +183,7 @@ describe("createHits", () => {
     const fr = floor(260, { low: -34 });
     setFrames(fr, 200, 2, { low: -22 }); // w 1/3 on the fire
     setFrames(fr, 202, 3, { low: -16 }); // w 2/3, inside the window
-    setFrames(fr, 207, 20, { low: -10 }); // w 1, after the window
+    setFrames(fr, 205, 1, { low: -10 }); // w 1, after the window (and inside the refractory)
     const once = run(fr);
     expect(once.fires).toEqual([fr[200].t]);
     expect(once.grows).toEqual([fr[202].t]);
@@ -192,6 +193,34 @@ describe("createHits", () => {
       expect(f).toHaveLength(1);
       expect(f[0].w).toBeCloseTo(2 / 3, 3);
     }
+  });
+
+  it("scales the weight by how far the low band rose: a hit over a sustained bass weighs nothing", () => {
+    // A snare (mid step) over a steady loud low band: the bass is heavy but did not arrive with the hit.
+    const held = floor(260, { low: -12, flat: true });
+    setFrames(held, 200, 3, { mid: -28, high: -32 });
+    const a = run(held);
+    expect(a.fires).toEqual([held[200].t]);
+    expect(a.weights[0]).toBe(0);
+    // The same snare with the low band 2 dB up from its floor: half of the level's weight (W_RISE 4 dB).
+    for (const [from, to] of [
+      [-24, -22],
+      [-12, -10],
+    ]) {
+      const fr = floor(260, { low: from, flat: true });
+      setFrames(fr, 200, 3, { low: to, mid: -28, high: -32 });
+      const b = run(fr);
+      expect(b.fires).toEqual([fr[200].t]);
+      expect(b.weights[0]).toBeCloseTo(((to - W_LO) / (W_HI - W_LO)) * (2 / W_RISE), 6);
+    }
+    // A rise that lands on the frames after the fire grows the weight to the full level weight.
+    const late = floor(260, { low: -24, flat: true });
+    setFrames(late, 200, 1, { low: -22, mid: -28, high: -32 });
+    setFrames(late, 201, 3, { low: -16 });
+    const c = run(late);
+    expect(c.fires).toEqual([late[200].t]);
+    expect(c.grows).toEqual([late[201].t]);
+    expect(c.out.weight).toBeCloseTo(2 / 3, 6);
   });
 
   it("evaluates a repeated frameIndex once", () => {
@@ -210,10 +239,10 @@ describe("createHits", () => {
     expect(run(busy.flatMap((f) => [f, f, f])).fires).toEqual([]);
   });
 
-  it("fires at most once per 0.1 s", () => {
+  it("fires at most once per 0.07 s", () => {
     for (const [gap, n] of [
-      [8, 1],
-      [11, 2],
+      [5, 1],
+      [8, 2],
     ]) {
       const fr = floor(260, { dt: 0.01 });
       setFrames(fr, 200, 2, { low: -28 });
@@ -300,8 +329,8 @@ describe("createHits", () => {
       for (let k = 0; k < fps * 4; k++) {
         const t = k / fps;
         const f = floor(1, { i0: k })[0];
-        if (t >= 2.5 && t < 2.55) f.low = -26; // 14 dB step
-        if (t >= 2.56 && t < 2.59) f.low = -26; // again, inside the 0.1 s refractory
+        if (t >= 2.5 && t < 2.52) f.low = -26; // 14 dB step
+        if (t >= 2.54 && t < 2.565) f.low = -26; // again, inside the 0.07 s refractory
         if (t >= 3 && t < 3.05) f.mid = -26;
         load(a, f);
         a.hostTime = /** @type {any} */ (undefined);

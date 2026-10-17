@@ -1,29 +1,23 @@
 // @ts-check
 /**
- * Beat hits and how heavy they are, from the spectrum the host sends (Chladni's hops and plate
- * pulse). The host's `onset` fires on any transient and its `beatPhase` drifts on real songs, so
- * this watches three bands of the auto-gained spectrum itself:
+ * Beat hits and how heavy they are, for Chladni's hops and plate pulse. The host's `onset` fires
+ * on any transient, so this watches three bands of the spectrum: low 23–141 Hz (kick, 808), mid
+ * 1–5 kHz (snare, clap, stomp, beatbox "pf") and high 6–15 kHz (only to recognise hats).
  *
- *   low  23–141 Hz   kick and 808 body
- *   mid  1–5 kHz     snare, clap, stomp, beatbox "pf"
- *   high 6–15 kHz    hats (only to recognise them)
- *
- * Per new analysis frame (`frameIndex` changed; at 144 fps the host resends frames; time is its
- * `hostTime`, or the summed `dt` for sources that send none), each band's
- * level in dB gives a flux: the rise over the lowest level of the frames seen in the last
- * FLUX_SPAN seconds. The flux is judged against its own last HIST seconds as a robust z score,
- * (flux − median) / (1.4826·MAD + Z_FLOOR), so a loud song and a quiet one fire alike. A hit is:
- *
+ * Per new analysis frame (`frameIndex` changed: at 144 fps the host resends frames; time is its
+ * `hostTime`, or the summed `dt` for sources that send none) a band's flux is its dB level's rise
+ * over the lowest level of the last FLUX_SPAN seconds, judged as a robust z score against its own
+ * last HIST seconds: (flux − median) / (1.4826·MAD + Z_FLOOR). A hit, at least REFRACTORY s apart:
  *   A  a low rise (z ≥ Z, ≥ FLUX_MIN dB) of A_STRONG dB or more, or with a host onset ≤ A_AGE s old
- *   S  a mid rise (z ≥ Z, ≥ FLUX_MIN dB) on a spectrum that is not hat-like
+ *   S  a mid rise (z ≥ Z, ≥ FLUX_MIN dB) on a spectrum that is not hat-like (mid − high < S_HAT_DB)
  *   C  a host onset of strength ≥ C_MIN on a spectrum that is not hat-like
+ * Its weight is how much bass arrived with it: the low level mapped from W_LO..W_HI dB to 0–1,
+ * times the low band's rise over the floor before the hit, full at W_RISE dB. A hat or cowbell over
+ * a ringing 808 weighs about nothing; a kick that lifts the bass weighs its level. For WEIGHT_WIN s
+ * after the fire (one FFT window, while the kick's low end fills it) a heavier frame grows it.
  *
- * where hat-like is mid − high < S_HAT_DB. Hits are at least REFRACTORY seconds apart. A hit's
- * weight is the low level mapped from W_LO..W_HI dB to 0–1; for WEIGHT_WIN seconds after the fire
- * (one FFT window, while the kick's low end fills it) a higher level grows it (`grow`).
- *
- * Measured on five real songs and nine synthetic tracks: 73–98% of reference beat hits fire, and
- * the weight follows the reference bass weight (Spearman 0.58–0.93). `step` allocates nothing.
+ * On five real songs and nine synthetic tracks (one hop per hit): 73–100% of the reference beat
+ * hits and 84–100% of the kicks fire. `step` allocates nothing.
  */
 
 export const LOW_HZ = [23, 141];
@@ -34,8 +28,7 @@ export const FLUX_SPAN = 0.035;
 /** Seconds of flux history behind the z score, and the floor (dB) on its spread. */
 export const HIST = 2;
 export const Z_FLOOR = 0.5;
-/** z score and rise (dB) a band must reach. */
-export const Z = 3;
+export const Z = 3; // z score and rise (dB) a band must reach
 export const FLUX_MIN = 3;
 /** A low rise of this many dB needs no host onset; smaller ones need one at most A_AGE s old. */
 export const A_STRONG = 6;
@@ -45,18 +38,21 @@ export const S_HAT_DB = -3;
 /** Host onset strength that fires on its own. */
 export const C_MIN = 0.6;
 /** Seconds between hits, at least. */
-export const REFRACTORY = 0.1;
+export const REFRACTORY = 0.07;
 /** Seconds after a fire in which the weight may grow. */
 export const WEIGHT_WIN = 0.043;
 /** Low level (dB) of weight 0 and of weight 1. */
 export const W_LO = -28;
 export const W_HI = -10;
+/** Low rise (dB over the floor before the hit) that keeps the level's full weight. */
+export const W_RISE = 4;
 
 /** Spectrum bin of `hz` (2048-point FFT). @param {number} hz @param {number} sampleRate */
 export function binOf(hz, sampleRate) {
   return Math.round((hz * 2048) / sampleRate);
 }
 
+const EDGES = [...LOW_HZ, ...MID_HZ, ...HIGH_HZ]; // Hz
 const RECENT = 16;
 const HCAP = 256;
 const MIN_HISTORY = 8;
@@ -108,8 +104,7 @@ function createBand() {
       rv[rh] = x;
       rh = (rh + 1) % RECENT;
       if (rn < RECENT) rn++;
-      // Live history: the newest entries within HIST s (older ones are dropped by age).
-      let m = 0;
+      let m = 0; // live history: the newest entries within HIST s (older ones drop out by age)
       for (let k = 0; k < hn; k++) {
         const j = (hh + HCAP - 1 - k) % HCAP;
         if (t - ht[j] > HIST) break;
@@ -131,11 +126,10 @@ function createBand() {
   return band;
 }
 
-/** @param {number} db */
-const weightOf = (db) => {
-  const w = (db - W_LO) / (W_HI - W_LO);
-  return w > 1 ? 1 : w > 0 ? w : 0;
-};
+/** Clamp to 0–1. @param {number} x */
+const unit = (x) => (x > 1 ? 1 : x > 0 ? x : 0);
+/** Weight of low level `db` that rose from `floor`. @param {number} db @param {number} floor */
+const weightOf = (db, floor) => unit((db - W_LO) / (W_HI - W_LO)) * unit((db - floor) / W_RISE);
 
 export function createHits() {
   const low = createBand();
@@ -146,7 +140,8 @@ export function createHits() {
   let lastT = -Infinity;
   let sinceNew = 0;
   let lastFire = -Infinity;
-  let fireT = NaN;
+  let fireT = -Infinity;
+  let floor = 0;
   const out = { fire: false, grow: false, weight: 0 };
   return {
     out,
@@ -161,24 +156,16 @@ export function createHits() {
       sinceNew += dt > 0 ? dt : 0; // NaN too
       if (audio.frameIndex === lastFrame) return out;
       lastFrame = audio.frameIndex;
-      // Without a finite hostTime (the harness's synthetic sources send none), a frame is as old as
-      // the previous one plus the time that has passed since it.
+      // No finite hostTime (the harness's synthetic sources): the previous frame's plus the time since.
       const t = Number.isFinite(audio.hostTime) ? audio.hostTime : (lastT === -Infinity ? 0 : lastT) + sinceNew;
       sinceNew = 0;
       if (audio.silent === true) return out;
-      if (t < lastT) {
-        lastFire = -Infinity; // host clock went back
-        fireT = NaN;
-      }
+      if (t < lastT) lastFire = fireT = -Infinity; // host clock went back
       lastT = t;
       const sr = num(audio.sampleRate, 48000);
       if (sr !== rate) {
         rate = sr;
-        const hz = [LOW_HZ, MID_HZ, HIGH_HZ];
-        for (let b = 0; b < 3; b++) {
-          bins[2 * b] = binOf(hz[b][0], sr);
-          bins[2 * b + 1] = binOf(hz[b][1], sr);
-        }
+        for (let i = 0; i < 6; i++) bins[i] = binOf(EDGES[i], sr);
       }
       const s = audio.spectrum;
       const xl = level(s, bins[0], bins[1]);
@@ -188,7 +175,7 @@ export function createHits() {
       mid.step(t, xm);
 
       if (t - fireT <= WEIGHT_WIN + 1e-9) {
-        const w = weightOf(xl);
+        const w = weightOf(xl, floor);
         if (w > out.weight) {
           out.weight = w;
           out.grow = true;
@@ -198,14 +185,14 @@ export function createHits() {
       const hatLike = xm - xh < S_HAT_DB;
       const a = low.z >= Z && low.flux >= FLUX_MIN && (low.flux >= A_STRONG || age <= A_AGE);
       const sm = mid.z >= Z && mid.flux >= FLUX_MIN && !hatLike;
-      const strength = num(audio.onsetStrength, 0);
-      const c = audio.onset === true && (strength > 1 ? 1 : strength) >= C_MIN && !hatLike;
+      const c = audio.onset === true && unit(num(audio.onsetStrength, 0)) >= C_MIN && !hatLike;
       if ((a || sm || c) && t - lastFire >= REFRACTORY - 1e-9) {
         lastFire = t;
         fireT = t;
+        floor = xl - low.flux;
         out.fire = true;
-        out.grow = false;
-        out.weight = weightOf(xl);
+        out.grow = false; // a fire supersedes a grow of the previous hit
+        out.weight = weightOf(xl, floor);
       }
       return out;
     },

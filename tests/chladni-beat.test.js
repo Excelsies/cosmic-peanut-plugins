@@ -14,7 +14,7 @@ import { createHop } from "../src/lib/sand.js";
 
 /**
  * @typedef {{ source: string, sampleRate: number, scored: [number, number], columns: string[],
- *   events: { kick: number[], snare: number[], hatOnly: number[] }, frames: number[][] }} Fixture
+ *   events: { kick: number[], snare: number[], hatOnly: number[], offBeat: number[] }, frames: number[][] }} Fixture
  */
 /** @param {string} name @returns {Fixture} */
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/chladni-${name}.json`, import.meta.url), "utf8"));
@@ -137,6 +137,25 @@ describe("Chladni hops on the phonk130 trace", () => {
       const near = (/** @type {number} */ t, /** @type {number[]} */ ev) => ev.some((e) => Math.abs(t - e) <= 0.05);
       const onHat = hops.filter((h) => near(h.t, fx.events.hatOnly) && !near(h.t, fx.events.kick) && !near(h.t, fx.events.snare));
       expect(onHat.length).toBeLessThanOrEqual(0.15 * hops.length);
+    });
+  }
+});
+
+// Phonk's off-beat hats and cowbells land on a ringing 808: the low band is loud but does not rise,
+// so their hops must stay small. (offBeat: hats and cowbells with no kick, snare or clap within
+// 50 ms, whatever else coincides.) A few still rise with the bass when the master compressor lets go
+// after a kick, hence the 20% allowance.
+describe("Chladni hop size on the phonk130 off-beat hats and cowbells", () => {
+  const fx = fixture("phonk130");
+  for (const fps of RATES) {
+    it(`keeps them small: median weight ≤ 0.1, at most 20% over 0.3 (${fps} fps)`, () => {
+      const hops = replay(fx, fps, true);
+      const near = (/** @type {number} */ t, /** @type {number[]} */ ev) => ev.some((e) => Math.abs(t - e) <= 0.05);
+      const off = hops.filter((h) => near(h.t, fx.events.offBeat) && !near(h.t, fx.events.kick) && !near(h.t, fx.events.snare));
+      expect(off.length).toBeGreaterThan(5);
+      const ws = off.map((h) => h.w).sort((a, b) => a - b);
+      expect(ws[Math.floor(ws.length / 2)]).toBeLessThanOrEqual(0.1);
+      expect(ws.filter((w) => w > 0.3).length).toBeLessThanOrEqual(0.2 * ws.length);
     });
   }
 });
