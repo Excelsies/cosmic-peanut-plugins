@@ -29,6 +29,8 @@ const CHASE = 1.1;
 const COHESION = 0.3;
 const STRIKE_KICK = 0.15;
 const WEAK_STRENGTH = 0.5;
+/** New weak bands allowed per second with reduceFlashing (strikes add at most one more). */
+const WEAK_PER_SECOND = 2;
 /** Seconds over which a wave's darkening fades (it has crossed the flock by then). */
 const WAVE_FADE = 2.5;
 
@@ -47,7 +49,8 @@ export function createDrive() {
   const squeezeEnv = createSqueeze();
   const striker = createStriker();
   const waves = createWaves();
-  const waveFlash = createFlashLimiter();
+  const wave0Flash = createFlashLimiter(3);
+  const wave1Flash = createFlashLimiter(WEAK_PER_SECOND);
   const A = new Float64Array(2);
   const G = new Float64Array(4); // strike geometry
   const F = new Float64Array(2); // falcon position
@@ -209,16 +212,16 @@ export function createDrive() {
       c.wave1id = s1.id;
       c.wave1kick = STRIKE_KICK * WEAK_STRENGTH;
 
-      // Darkening: each wave fades as it ages; their sum goes through the flash limiter.
-      const a0 = s0.active ? s0.amp * Math.exp(-(now - s0.t0) / WAVE_FADE) * react : 0;
-      const a1 = s1.active ? s1.amp * Math.exp(-(now - s1.t0) / WAVE_FADE) * react : 0;
-      // A new wave replaces the old shell: count that as a fall to 0 and a rise on the next frame,
-      // so the limiter allows at most 3 new bands per second.
-      const raw = ev !== 0 ? 0 : a0 + a1;
-      const lim = waveFlash.step(raw > 1 ? 1 : raw, dt, reduceFlashing);
-      const scale = raw > 1e-6 ? lim / raw : 0;
-      out.wave0Amp = clamp(a0 * scale, 0, 1);
-      out.wave1Amp = clamp(a1 * scale, 0, 1);
+      // Darkening: each wave fades as it ages, through its own flash limiter. Restarting a slot
+      // replaces its shell: with reduceFlashing that counts as a fall to 0 and a rise on the next
+      // frame, for that slot only. Strikes are ≥ 1.2 s apart and weak bands ≤ 2 per second, so
+      // both together start at most 3 new bands in any second.
+      let a0 = s0.active ? s0.amp * Math.exp(-(now - s0.t0) / WAVE_FADE) * react : 0;
+      let a1 = s1.active ? s1.amp * Math.exp(-(now - s1.t0) / WAVE_FADE) * react : 0;
+      if (reduceFlashing && ev === STRIKE) a0 = 0;
+      if (reduceFlashing && ev === WEAK) a1 = 0;
+      out.wave0Amp = wave0Flash.step(a0 > 1 ? 1 : a0, dt, reduceFlashing);
+      out.wave1Amp = wave1Flash.step(a1 > 1 ? 1 : a1, dt, reduceFlashing);
 
       // Falcon.
       const tF = now - falconT0;

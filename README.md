@@ -69,8 +69,10 @@ strike. A `three` visualizer.
 ### Accessibility
 
 - **Reduce flashing** (on by default): a dense dark flock on a light sky changes the mean
-  luminance, so the squeeze envelope and the wave darkening both go through the shared flash
-  limiter (at most 3 rises per second); strikes are at least 1.2 s apart; the sky never pulses.
+  luminance, so the squeeze envelope and the wave darkening go through the shared flash
+  limiter: the squeeze rises at most 3 times per second; each wave slot has its own limiter, a
+  restarted band counting as a fall and a rise, so weak bands start at most twice per second and
+  strikes (at least 1.2 s apart) add at most one more. The sky never pulses.
 - **Reduce motion** (while Speed is at its default): speed 0.5, no falcon and no flee burst (the
   wave still runs), half the sweep, cirrus drift × 0.3.
 

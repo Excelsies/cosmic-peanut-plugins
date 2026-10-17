@@ -99,7 +99,58 @@ describe("createDrive", () => {
     expect(b.d.out.balance).toBe(0);
   });
 
-  it("caps wave darkening rises at 3 per second for a 10 Hz onset train with reduceFlashing", () => {
+  it("keeps the strike band steady while weak onsets arrive at 7.5 Hz", () => {
+    /** @param {boolean} rf */
+    const run = (rf) => {
+      const { f, c, p, d } = setup();
+      let life = 0;
+      let shown = 0;
+      let toggles = 0;
+      let prevOn = false;
+      let lastId = 0;
+      let rises = /** @type {number[]} */ ([]);
+      let prev0 = 0;
+      let prev1 = 0;
+      for (let i = 0; i < 450; i++) {
+        const onset = i % 8 === 0;
+        const strong = i % 120 === 0;
+        d.step(frame({ onset, onsetStrength: strong ? 0.9 : 0.2, onsetAge: 0 }), i * DT, DT, p, rf, f, c, HX, HY);
+        const a0 = d.out.wave0Amp;
+        const a1 = d.out.wave1Amp;
+        if (a0 - prev0 > 0.02 || a1 - prev1 > 0.02) rises.push(i * DT);
+        prev0 = a0;
+        prev1 = a1;
+        // The band's life starts the frame after its strike (the restart frame is a fall).
+        if (c.wave0 && c.wave0id === lastId) {
+          life++;
+          const on = a0 > 0;
+          if (on) shown++;
+          if (on !== prevOn) toggles++;
+          prevOn = on;
+        } else {
+          lastId = c.wave0id;
+          prevOn = true;
+        }
+      }
+      let maxIn1s = 0;
+      for (let i = 0; i < rises.length; i++) {
+        let k = 0;
+        for (let j = i; j < rises.length && rises[j] - rises[i] < 1 - 1e-6; j++) k++;
+        maxIn1s = Math.max(maxIn1s, k);
+      }
+      return { life, shown, toggles, maxIn1s };
+    };
+    const off = run(false);
+    expect(off.life).toBeGreaterThan(300);
+    expect(off.shown).toBe(off.life);
+    expect(off.toggles).toBe(0);
+    const on = run(true);
+    expect(on.shown).toBeGreaterThan(on.life * 0.95);
+    expect(on.toggles).toBe(0);
+    expect(on.maxIn1s).toBeLessThanOrEqual(3); // both slots together
+  });
+
+  it("caps weak-band rises at 2 per second for a 10 Hz onset train with reduceFlashing, and never blinks without it", () => {
     /** @param {boolean} rf */
     const run = (rf) => {
       const { f, c, p, d } = setup({ falcon: false });
@@ -133,9 +184,11 @@ describe("createDrive", () => {
       }
       return { n, maxIn1s };
     };
-    expect(rises(run(false)).maxIn1s).toBeGreaterThan(3);
+    // Without reduceFlashing each restart just moves the band back to its origin: no blink.
+    const free = run(false);
+    expect(Math.min(...free.slice(1))).toBeGreaterThan(0.4);
     const lim = rises(run(true));
     expect(lim.n).toBeGreaterThan(3);
-    expect(lim.maxIn1s).toBeLessThanOrEqual(3);
+    expect(lim.maxIn1s).toBeLessThanOrEqual(2); // weak bands; a strike may add one more
   });
 });
