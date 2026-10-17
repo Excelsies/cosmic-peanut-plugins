@@ -129,6 +129,24 @@
         { "id": "coastline", "type": "boolean", "label": "Coastline", "default": true },
         { "id": "tints", "type": "boolean", "label": "Warm-sector tint", "default": true }
       ]
+    },
+    {
+      "id": "kelir",
+      "name": "Kelir",
+      "description": "Shadow-puppet theatre on a lamp-lit cotton screen: on each hit a puppet lunges and its soft grey shadow snaps into sharp black lace, the melody lifts the hands on their rods, hats make the flame flicker, and in silence the tree of life returns to centre stage.",
+      "author": "Fieldwork",
+      "entry": "src/kelir/kelir.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/kelir.jpg",
+      "params": [
+        { "id": "screen", "type": "select", "label": "Screen", "options": ["lamp", "moon", "reiniger", "none"], "default": "lamp" },
+        { "id": "cast", "type": "select", "label": "Cast", "options": ["duet", "solo", "kayon"], "default": "duet" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "flicker", "type": "number", "label": "Flicker", "min": 0, "max": 1, "step": 0.05, "default": 0.5 },
+        { "id": "blur", "type": "number", "label": "Blur", "min": 0, "max": 1.5, "step": 0.05, "default": 1 },
+        { "id": "lace", "type": "number", "label": "Lace", "min": 0.5, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "scenes", "type": "boolean", "label": "Scenes", "default": true }
+      ]
     }
   ]
 }
