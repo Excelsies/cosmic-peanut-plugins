@@ -38,12 +38,12 @@ static diagonal sheen, and dark iron filings that gather into the standing-wave 
 you hear (lattices, crosses, nested diamonds, curved butterflies). Higher notes give finer figures
 with more cells. When the note changes the two figures crossfade over 0.4 s and the sand visibly
 streams from the old lines to the new ones. Every kick, snare, clap or stomp makes the sand hop,
-and the heavier the bass under the hit, the bigger the hop: a light snare lifts a third of the
-grains a little way, a heavy kick or 808 throws them all up and scatters them, and the figure
-dissolves into dust for up to 150 ms before it lands and re-sharpens. Only heavy hits carry a faint
-haze, and under Reduce flashing at most three of those a second. The plate also shakes harder on
-each hit, so between hops the sand keeps moving with the beat without getting any brighter. Music
-with no drums gets small hops on its note attacks. Hats add a fine fizz, bass and stereo balance
+and the more bass arrives with the hit, the bigger the hop: a snare over a steady bass lifts a
+third of the grains a little way, a kick that lifts the bass throws them all up and scatters them,
+and the lines go soft for up to 150 ms before the sand lands and re-sharpens. A hop moves the sand
+without brightening it; only heavy hits carry a faint haze, and under Reduce flashing at most three
+of those a second. The plate also shakes harder on each hit, so between hops the sand keeps moving
+with the beat. Music with no drums gets small hops on its note attacks. Hats add a fine fizz, bass and stereo balance
 tilt the plate slightly, and silence freezes the last figure where it lies. Renderer: `webgl2`.
 
 ### Parameters
@@ -77,19 +77,23 @@ tilt the plate slightly, and silence freezes the last figure where it lies. Rend
   as a robust z score against its own last 2 s: (flux − median)/(1.4826·MAD + 0.5). A hit is a low
   rise (z ≥ 3, ≥ 3 dB) of 6 dB or more, or with a host onset at most 30 ms old; or a mid rise
   (z ≥ 3, ≥ 3 dB); or a host onset of strength ≥ 0.6; the last two not on a hat-like spectrum
-  (mid more than 3 dB under high). Hits are at least 0.1 s apart. The weight is the low level
-  mapped from −28..−10 dB to 0–1, and may grow for 43 ms (one FFT window) while the kick's low
-  end fills the window. The spectrum is auto-gained by the host, so the weight ranks hits within a
-  song and songs against each other: replayed on five real songs, 85–98% of reference kicks and
-  73–97% of beat hits hop, and the weight follows the reference bass weight (Spearman 0.58–0.82).
+  (mid more than 3 dB under high). Hits are at least 0.07 s apart. The weight is how much bass
+  arrives with the hit: the low level mapped from −28..−10 dB to 0–1, times the low band's rise
+  over its floor before the hit, full at 4 dB, so a hat or cowbell over a ringing 808 weighs about
+  nothing. It may grow for 43 ms (one FFT window) while the kick's low end fills the window.
+  Replayed on five real songs at 60 and 144 fps, scoring one hop per hit, 90–98% of the reference
+  kicks on the four drum-driven songs and 73–96% of the beat hits hop (all of them on most
+  synthetic tracks), and kicks weigh more than snares on every drum-driven song.
 - **Hops** (`sand.js` `createHop`): a hit of weight w launches 0.3 + 0.7·w of the grounded grains
   with vz0 = g·0.075·hop·(0.4 + 0.6·w) (a 0.15 s flight at w = 1) and hashed lateral scatter
-  0.12·hop·w²; a grow re-sends the bigger hop under the same sequence number, so only the extra
-  grains launch. Hits over w = 0.7 raise the haze to 0.25·(w − 0.7)/0.3, held through the 43 ms
+  0.12·hop·w²; a grow re-sends the bigger hop under the same sequence number with the share
+  already launched, so only the grains between the two shares go up. Hits over w = 0.7 raise the haze to 0.25·(w − 0.7)/0.3, held through the 43 ms
   window, then decaying with τ 0.15 s.
-- **Audio mapping** (`sand.js` `createPlateDrive`): drive = base·(1 + pulse), at most
+- **Audio mapping** (`sand.js` `createPlateDrive`): drive = knee(base)·(1 + pulse), at most
   3·reactivity, where base = clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5)·reactivity (τ 0.1 s, 0
-  within 0.3 s of silence) and pulse jumps to 0.4 + 0.6·w on each hit and decays with τ 0.12 s;
+  within 0.3 s of silence), knee bends base/reactivity above 1 toward 1.5 (tanh) so that loud
+  songs keep room for the pulse, and pulse jumps to 0.4 + 0.6·w on each hit and decays with
+  τ 0.12 s;
   fizz = clamp(trebAtt − 1, 0, 2)·0.5 + flux·0.5; bass tilt 0.15·clamp(bassAtt − 1, −1, 1)
   (τ 0.3 s); stereo tilt 0.6·balance·reactivity (τ 0.5 s, `stereo.js`, exactly 0 for mono or
   bit-identical L/R, as with the app's synthetic sources).
@@ -106,24 +110,26 @@ tilt the plate slightly, and silence freezes the last figure where it lies. Rend
   `EXT_color_buffer_float` it falls back to `RGBA8` at 4/255 per grain, which saturates sooner.
 - **Composite** (`composite.frag`): one full-resolution pass. Coverage h = 1 − exp(−1.6·R) from 5
   taps, a normal from the central-difference slope, Lambert light from the upper left plus a rim
-  term, so ridges get a thin highlight and cast a thin shadow on the plate. Dust is drawn a touch
-  lighter and softer with a small offset shadow. The hop's haze envelope (0–0.5) scales the dust
-  by 0.65 + 0.35·haze on the plate and by 0.65 + 0.2·haze with Backdrop none, where the dust is
-  light added over black rather than a veil over the plate. The plate (gradient, anisotropic
-  hash brushing, sheen) never reacts to audio.
+  term, so ridges get a thin highlight and cast a thin shadow on the plate. On the plate, dust is
+  drawn a touch lighter and softer with a small offset shadow, scaled by 0.65 + 0.35·haze. With
+  Backdrop none the dust covers what the same grains covered on the ground: its splat is converted
+  to grounded mass and goes through the same coverage curve, at 0.85 of the sand colour, so a hop
+  moves light around instead of adding it, on fine figures as on coarse ones; the haze (0–0.25)
+  lifts it by up to 7.5%. The plate (gradient, anisotropic hash brushing, sheen) never reacts to
+  audio.
 
 ### Accessibility
 
-- **Reduce flashing** (on by default): the haze, the only brightness change bigger than about a
-  level, goes through the photosensitivity limiter (`lib/flash.js`, a copy of the built-in one,
-  at most 3 rises per second). A heavy hit it refuses still hops, at weight 0.7 and with no haze,
-  so it reads as motion rather than a flash; with Reduce flashing off nothing is downgraded. The
-  drive pulse moves the sand without changing its brightness. Figure changes are always
-  crossfades of 0.4 s or longer, never cuts. Measured on harness renders on slate with Backdrop
-  none: a hop's first frame changes the mean luma by at most 2.7 of 255 levels on five real
-  songs and 1.6 on the drums source, and at most 5.6 on the music source, whose high notes give
-  fine figures where airborne dust lifts the brightness more (up to 7 levels at the peak of a
-  heavy hop).
+- **Reduce flashing** (on by default): the haze of heavy hits goes through the photosensitivity
+  limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second). A heavy hit it
+  refuses still hops, at weight 0.7 and with no haze; with Reduce flashing off nothing is
+  downgraded. The drive pulse moves the sand without changing its brightness. Figure changes are
+  always crossfades of 0.4 s or longer, never cuts. Measured on harness renders on slate with
+  Backdrop none: a hop's first frame changes the mean luma by at most 0.8 of 255 levels on five
+  real songs and the harness sources (0.9 at Hop 2), and a hop's largest swell (from scattered
+  sand that has not yet drifted back into the lines) is at most 2.8 levels. With the figure held,
+  a weight-0.3 hop swells by at most 1.5 levels and a weight-0.7 hop by at most 2.5 on the finest figure, and a
+  5 Hz train of full-weight hits never makes a 3-level flash.
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
   reactivity 0.5, hops at half height, the drive pulse and the bass tilt are off.
 
