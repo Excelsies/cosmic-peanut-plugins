@@ -35,6 +35,24 @@
         { "id": "falcon", "type": "boolean", "label": "Falcon", "default": true },
         { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
       ]
+    },
+    {
+      "id": "plotter",
+      "name": "Plotter",
+      "description": "A pen plotter traces one decaying harmonograph per phrase on a sheet of blueprint paper: the harmony sets the figure, hits kink the line, loudness presses the pen.",
+      "author": "Fieldwork",
+      "entry": "src/plotter.js",
+      "renderer": "2d",
+      "thumbnail": "thumbs/plotter.jpg",
+      "params": [
+        { "id": "grid", "type": "select", "label": "Grid", "options": ["4x3", "3x2", "6x4", "1x1"], "default": "4x3" },
+        { "id": "phrase", "type": "select", "label": "Phrase", "options": ["2 bars", "4 bars", "8 bars"], "default": "4 bars" },
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["blueprint", "cream", "white", "none"], "default": "blueprint" },
+        { "id": "inks", "type": "select", "label": "Inks", "options": ["fineliner", "sepia", "mono"], "default": "fineliner" },
+        { "id": "weight", "type": "number", "label": "Line weight", "min": 0.5, "max": 3, "step": 0.05, "default": 1 },
+        { "id": "chatter", "type": "number", "label": "Pen chatter", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "speed", "type": "number", "label": "Speed", "min": 0.25, "max": 2, "step": 0.05, "default": 1 }
+      ]
     }
   ]
 }
