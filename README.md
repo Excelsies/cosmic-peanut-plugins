@@ -37,8 +37,11 @@ Sand on a ringing brass plate. The window is the plate, edge to edge: warm brush
 static diagonal sheen, and dark iron filings that gather into the standing-wave figure of the note
 you hear (lattices, crosses, nested diamonds, curved butterflies). Higher notes give finer figures
 with more cells. When the note changes the two figures crossfade over 0.4 s and the sand visibly
-streams from the old lines to the new ones. A kick makes every grain hop: for about 150 ms the
-figure dissolves into airborne dust with a small offset shadow, then lands and re-sharpens. Hats
+streams from the old lines to the new ones. A kick (a hit whose bass jumps more than its treble,
+so not a hat, snare or clap) makes every grain hop, at most once every 0.4 s: for about 150 ms the
+figure dissolves into airborne dust with a faint haze and a small offset shadow, then lands and
+re-sharpens. Hops land on the kick itself, about 25 ms after it, and at fast tempos the gap keeps
+the stronger pattern hits. Music with no drums rarely hops and just drifts between figures. Hats
 add a fine fizz, bass and stereo balance tilt the plate slightly, and silence freezes the last
 figure where it lies. Renderer: `webgl2`.
 
@@ -64,15 +67,23 @@ figure where it lies. Renderer: `webgl2`.
 - **Pitch** (`pitch.js`): the strongest bin between 200 Hz and 2 kHz with magnitude > 0.08 and
   more than 3× the window mean, refined by parabolic interpolation of the log magnitude, gives a
   midi note; index = clamp(floor((midi − 55)·0.72·complexity), 0, 31). A new index must hold for
-  0.2 s of summed `dt` (an onset switches at once); silence and atonal input hold the figure. It
-  starts on index 6, so drums alone still draw a figure. The bin window is rebuilt only when the
-  sample rate changes.
+  0.2 s of summed `dt` and then changes on the next beat: the tempo tracker's predicted beat
+  (`meter.js`) or a kick, or after 1 s if no beat comes (no tempo, no drums). A melody that
+  moves on every beat or faster therefore leaves the figure where it is. Silence and atonal input
+  hold the figure. It starts on index 6, so drums alone still draw a figure. The bin window is
+  rebuilt only when the sample rate changes.
+- **Kicks** (`kick.js`): an onset whose `bass` reaches 1.6× its pre-onset level within 50 ms,
+  with `treb` rising at most 2× as much as the bass (levels floored at 0.15). The host's `onset`
+  fires on any transient; this keeps the kicks. A kick under a loud hat (the treble rising more
+  than twice as much as the bass) is skipped, the price of rejecting snares with a low body. Hops
+  are at least 0.4 s apart (`createHop`); the haze rises to 0.5·(0.4 + 0.6·strength) and decays
+  with τ 0.15 s, with strength taken on the onset frame.
 - **Audio mapping** (`sand.js` `createPlateDrive`, `createHop`): drive = clamp(0.5·min(midAtt, 2)
   + 4·rms, 0, 2.5)·reactivity (τ 0.1 s, 0 within 0.3 s of silence); fizz = clamp(trebAtt − 1, 0,
   2)·0.5 + flux·0.5; bass tilt 0.15·clamp(bassAtt − 1, −1, 1) (τ 0.3 s); stereo tilt
   0.6·balance·reactivity (τ 0.5 s, `stereo.js`, exactly 0 for mono or bit-identical L/R, as with
-  the app's synthetic sources); hop vz0 = g·0.075·hop·(0.4 + 0.6·onsetStrength), a 0.15 s flight
-  at full strength, with hashed lateral scatter 0.25·strength·hop.
+  the app's synthetic sources); hop vz0 = g·0.075·hop·(0.4 + 0.6·strength), a 0.15 s flight at
+  full strength, with hashed lateral scatter 0.25·strength·hop.
 - **Grains** (`shaders/chladni/update.vert`): 24 bytes each, (x, y, vx, vy) + (z, vz), in two
   buffers ping-ponged with transform feedback (interleaved, rasterizer discard). Fixed 1/120 s
   steps (`fixedstep.js`, at most 4 per frame), one `drawArrays(POINTS)` each. Grounded grains:
@@ -92,11 +103,11 @@ figure where it lies. Renderer: `webgl2`.
 
 ### Accessibility
 
-- **Reduce flashing** (on by default): every hop asks the photosensitivity limiter
-  (`lib/flash.js`, a copy of the built-in one) for a rise of the dust-haze envelope; only an
-  admitted rise launches the grains, so there are at most 3 hops per second and further onsets
-  only add fizz. The faint global haze is that limited envelope. Figure changes are always
-  crossfades of 0.4 s or longer, never cuts.
+- **Reduce flashing** (on by default): hops are at most 2.5 per second by design (0.4 s gap),
+  with Reduce flashing on or off. The haze envelope still goes through the photosensitivity
+  limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second) as a
+  guarantee. Figure changes are always crossfades of 0.4 s or longer, never cuts, at most one per
+  beat.
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
   reactivity 0.5, hops at half height and the bass tilt is off.
 
@@ -798,7 +809,9 @@ General-purpose helpers, one copy each:
   mono or bit-identical channels (Soapfilm's, Miura's and Kelir's stereo drift).
 - `color.js`: `#rrggbb` param parsing with a fallback.
 - `meter.js`: a beat counter on the host's `beatPhase` that ignores tempo-tracker jitter
-  (Plotter's phrases, Misregister's re-layouts).
+  (Plotter's phrases, Misregister's re-layouts, Chladni's figure changes).
+- `kick.js`: kicks out of the host's generic onsets, by a bass rise that the treble doesn't
+  outrun (Chladni's hops).
 - `beatclock.js`: a continuous clock in beats that runs free at 1 beat/s without a tempo
   (Murmuration's sweep, and the beat counts of Soapfilm, Miura, Isobar and Kelir).
 - `hash.js`: a deterministic hash of an integer to [0, 1), so runs never need `Math.random`.

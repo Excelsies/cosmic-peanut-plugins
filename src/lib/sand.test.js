@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createPlateDrive, flightTime, GRAIN_FLOATS, hopVz0, seedGrains } from "./sand.js";
+import { createHop, createPlateDrive, flightTime, GRAIN_FLOATS, HAZE_PEAK, hopVz0, MIN_HOP_GAP, seedGrains } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -42,44 +42,84 @@ function maxPerSecond(times) {
   return best;
 }
 
-/** Run createHop on a 10 Hz onset train. @param {boolean} reduce @param {number} dt */
-function onsetTrain(reduce, dt = DT, seconds = 4) {
+/**
+ * Run createHop on a kick train (one confirmed kick every `period` s, on whole frames).
+ * @param {number} period @param {boolean} reduce @param {number} dt
+ */
+function kickTrain(period, reduce, dt = DT, seconds = 4, strength = 1) {
   const hop = createHop();
   /** @type {number[]} */ const hops = [];
   /** @type {number[]} */ const haze = [];
-  let next = 0;
+  const every = Math.round(period / dt);
   for (let i = 0; i < Math.round(seconds / dt); i++) {
-    const t = i * dt;
-    const onset = t >= next - 1e-9;
-    if (onset) next += 0.1;
-    const h = hop.step(onset, 1, 1, dt, reduce);
-    if (h.impulse > 0) hops.push(t);
+    const h = hop.step(i % every === 0, strength, 1, dt, reduce);
+    if (h.impulse > 0) hops.push(i * dt);
     haze.push(h.haze);
   }
   return { hops, haze };
 }
 
 describe("hop", () => {
+  it("exports the gap and the haze peak", () => {
+    expect([MIN_HOP_GAP, HAZE_PEAK]).toEqual([0.4, 0.5]);
+  });
+
   it("launches grains for a 0.15 s flight at Hop 1 and full strength", () => {
     expect(flightTime(hopVz0(1, 1))).toBeCloseTo(0.15, 6);
     expect(flightTime(hopVz0(1, 0))).toBeCloseTo(0.06, 6);
     expect(hopVz0(0, 1)).toBe(0);
   });
 
-  it("admits every onset when reduce flashing is off", () => {
-    expect(onsetTrain(false).hops.length).toBe(40);
-  });
-
-  it("admits at most 3 hops per second under a 10 Hz onset train with reduce flashing", () => {
-    for (const dt of [1 / 60, 1 / 120]) {
-      const { hops, haze } = onsetTrain(true, dt);
-      expect(hops.length).toBeGreaterThan(4); // still reacts
-      expect(maxPerSecond(hops)).toBeLessThanOrEqual(3);
-      expect(maxPerSecond(flashStarts(haze, dt))).toBeLessThanOrEqual(3);
+  it("keeps hops at least 0.4 s apart: a 4 kicks/s train hops on every other kick, flashing limited or not", () => {
+    for (const reduce of [false, true]) {
+      const { hops } = kickTrain(0.25, reduce);
+      expect(hops).toHaveLength(8);
+      hops.forEach((t, i) => expect(t).toBeCloseTo(0.5 * i, 9));
     }
   });
 
-  it("reports the impulse once per admitted onset with scatter and a new sequence number", () => {
+  it("hops on every kick 0.45 s apart, and on every kick exactly 0.4 s apart", () => {
+    for (const reduce of [false, true]) {
+      expect(kickTrain(0.45, reduce, 1 / 60, 4.5).hops).toHaveLength(10);
+      expect(kickTrain(0.4, reduce, 1 / 60).hops).toHaveLength(10);
+      expect(kickTrain(0.4, reduce, 1 / 120).hops).toHaveLength(10);
+    }
+  });
+
+  it("stays within 3 hops and 3 flashes per second under a 10 Hz kick train with reduce flashing", () => {
+    for (const dt of [1 / 60, 1 / 120]) {
+      const { hops, haze } = kickTrain(0.1, true, dt);
+      expect(hops.length).toBeGreaterThan(4); // still reacts
+      expect(maxPerSecond(hops)).toBeLessThanOrEqual(3);
+      expect(maxPerSecond(flashStarts(haze, dt, 0.05))).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("raises the haze to 0.5·(0.4 + 0.6·strength) on the hop frame, then decays it with τ 0.15 s", () => {
+    for (const [s, peak] of [
+      [1, 0.5],
+      [0, 0.2],
+      [2, 0.5],
+    ]) {
+      const hop = createHop();
+      expect(hop.step(true, s, 1, DT, true).haze).toBeCloseTo(peak, 9);
+      expect(hop.step(false, s, 1, DT, true).haze).toBeCloseTo(peak * Math.exp(-DT / 0.15), 9);
+    }
+  });
+
+  it("never raises the haze without a hop", () => {
+    const hop = createHop();
+    hop.step(true, 1, 1, DT, true);
+    const strengths = [0.9, 0.1, 1, 0.4, 0.7, 0, 0.55, 0.3];
+    let last = hop.step(false, 1, 1, DT, true).haze;
+    for (let i = 0; i < 300; i++) {
+      const h = hop.step(false, strengths[i % strengths.length], 1, DT, i % 2 === 0).haze;
+      expect(h).toBeLessThanOrEqual(last);
+      last = h;
+    }
+  });
+
+  it("reports the impulse once per admitted kick with scatter and a new sequence number", () => {
     const hop = createHop();
     const a = hop.step(true, 0.5, 2, DT, true);
     expect(a.impulse).toBeCloseTo(hopVz0(2, 0.5));
@@ -92,8 +132,10 @@ describe("hop", () => {
 
   it("does nothing at Hop 0", () => {
     const hop = createHop();
-    const h = hop.step(true, 1, 0, DT, false);
-    expect([h.impulse, h.haze]).toEqual([0, 0]);
+    for (let i = 0; i < 60; i++) {
+      const h = hop.step(i % 30 === 0, 1, 0, DT, false);
+      expect([h.impulse, h.haze, h.seq]).toEqual([0, 0, 0]);
+    }
   });
 });
 

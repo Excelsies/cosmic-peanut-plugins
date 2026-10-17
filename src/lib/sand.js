@@ -12,9 +12,10 @@
  *
  * where u is the standing-wave field and ξ a hashed unit-variance direction. ∇(u²) pulls sand
  * down into the node lines (u = 0); the shake is strongest on antinodes, so grains there jitter
- * off them, and vanishes on the nodes, so lines stay crisp. A kick launches every grain with
- * vz0 = GRAVITY·0.075·hop·(0.4 + 0.6·strength) (a 0.15 s flight at full strength) and a hashed
- * lateral scatter; airborne grains fly ballistically with only AIR_DRAG and land with z = 0.
+ * off them, and vanishes on the nodes, so lines stay crisp. A kick (lib/kick.js) launches every
+ * grain with vz0 = GRAVITY·0.075·hop·(0.4 + 0.6·strength) (a 0.15 s flight at full strength) and a
+ * hashed lateral scatter, at most once per MIN_HOP_GAP; airborne grains fly ballistically with only
+ * AIR_DRAG and land with z = 0.
  * Edges reflect with RESTITUTION.
  */
 import { createFlashLimiter } from "./flash.js";
@@ -41,6 +42,15 @@ export const GRAVITY = 4;
 const SILENT_TAU = 0.075;
 /** The hop's dust haze decays with this time constant (s). */
 const HAZE_TAU = 0.15;
+/**
+ * Seconds between hops, at least: one beat at 150 bpm. At fast tempos it keeps the stronger
+ * pattern kicks (dnb's downbeat and its beat-2.5 kick, not the follow-up 172 ms after the
+ * downbeat), and it holds hops at or under 2.5 per second whatever the music does. In seconds, not
+ * beats: a tracker locked at half tempo would stretch a beat-based gap onto the wrong kicks.
+ */
+export const MIN_HOP_GAP = 0.4;
+/** Haze peak at full kick strength; 0.4 of it at strength 0. */
+export const HAZE_PEAK = 0.5;
 
 /**
  * Launch speed for a hop. @param {number} hop the Hop param (already reduced for reduce motion)
@@ -57,32 +67,42 @@ export function flightTime(vz0) {
 }
 
 /**
- * Kick → hop. Each onset asks the photosensitivity limiter for a rise of the dust-haze envelope;
- * only an admitted rise launches the grains, so with reduce flashing on there are at most 3 hops
- * per second and later onsets only add fizz. `step` returns the same object every call: `impulse`
- * (vz0, non-zero only on the frame of an admitted hop), `scatter` (lateral speed), `seq` (hop
- * counter, seeds the scatter hash) and `haze` (the limited envelope, 0–1).
+ * Kick → hop. A confirmed kick (lib/kick.js) launches the grains if the last hop was at least
+ * MIN_HOP_GAP ago, and raises the dust-haze envelope to HAZE_PEAK·(0.4 + 0.6·strength), which
+ * then decays with τ HAZE_TAU. The envelope still goes through the photosensitivity limiter (at
+ * most 3 rises per second) as a guarantee; with the gap it never has to step in, so hops are the
+ * same with reduce flashing on or off. Kicks inside the gap do nothing. `step` returns the same
+ * object every call: `impulse` (vz0, non-zero only on the frame of a hop), `scatter` (lateral
+ * speed), `seq` (hop counter, seeds the scatter hash) and `haze` (the limited envelope, 0–1).
  */
 export function createHop() {
   const limiter = createFlashLimiter();
   let env = 0;
+  let since = Infinity;
   const out = { impulse: 0, scatter: 0, seq: 0, haze: 0 };
   return {
     /**
-     * @param {boolean} onset
-     * @param {number} strength
+     * @param {boolean} kick a confirmed kick on this frame (createKick().step)
+     * @param {number} strength the kick's strength (createKick().strength), clamped to 0–1
      * @param {number} hop effective Hop param
      * @param {number} dt
      * @param {boolean} reduceFlashing
      */
-    step(onset, strength, hop, dt, reduceFlashing) {
-      const kick = onset && hop > 0;
-      const target = kick ? 1 : env * Math.exp(-Math.max(0, dt) / HAZE_TAU);
-      env = limiter.step(target, dt, reduceFlashing);
-      const admitted = kick && env >= 1;
-      out.impulse = admitted ? hopVz0(hop, strength) : 0;
-      out.scatter = admitted ? 0.25 * (strength > 1 ? 1 : strength > 0 ? strength : 0) * hop : 0;
-      if (admitted) out.seq++;
+    step(kick, strength, hop, dt, reduceFlashing) {
+      const d = Math.max(0, dt);
+      since += d;
+      const s = strength > 1 ? 1 : strength > 0 ? strength : 0;
+      const want = kick && hop > 0 && since >= MIN_HOP_GAP - 1e-9;
+      const decayed = env * Math.exp(-d / HAZE_TAU);
+      const target = want ? Math.max(HAZE_PEAK * (0.4 + 0.6 * s), decayed) : decayed;
+      env = limiter.step(target, d, reduceFlashing);
+      const admitted = want && env >= target;
+      out.impulse = admitted ? hopVz0(hop, s) : 0;
+      out.scatter = admitted ? 0.25 * s * hop : 0;
+      if (admitted) {
+        out.seq++;
+        since = 0;
+      }
       out.haze = hop > 0 ? env : 0;
       return out;
     },

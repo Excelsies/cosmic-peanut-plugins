@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { candidateIndex, createModeGate, createPitch } from "./pitch.js";
+import { BEAT_WAIT, candidateIndex, createModeGate, createPitch, HOLD } from "./pitch.js";
 
 /** A spectrum with one Gaussian partial at `hz` over a low floor. @param {number} hz @param {number} sr */
 function tone(hz, sr, amp = 0.5) {
@@ -55,32 +55,60 @@ describe("candidateIndex", () => {
 });
 
 describe("createModeGate", () => {
-  it("starts on mode 6 and holds it through silence and atonal input", () => {
+  /**
+   * First frame on which the gate reports `want`, or -1.
+   * @param {(i: number) => number} midiAt @param {(i: number) => boolean} beatAt @param {number} hz @param {number} want
+   */
+  function switchFrame(midiAt, beatAt, hz, want, frames = 4 * hz) {
+    const g = createModeGate(6);
+    for (let i = 0; i < frames; i++) if (g.step(midiAt(i), beatAt(i), 1 / hz, 1) === want) return i;
+    return -1;
+  }
+
+  it("exports the beat wait", () => {
+    expect([HOLD, BEAT_WAIT]).toEqual([0.2, 1]);
+  });
+
+  it("starts on mode 6 and holds it through silence and atonal input, beats or not", () => {
     const g = createModeGate(6);
     for (let i = 0; i < 120; i++) expect(g.step(NaN, i % 30 === 0, 1 / 60, 1)).toBe(6);
   });
 
-  it("switches after a candidate has held 0.2 s, at the same audio time at 60 Hz and 120 Hz", () => {
-    for (const hz of [60, 120]) {
-      const g = createModeGate(6);
-      let t = 0;
-      let switchedAt = -1;
-      for (let i = 0; i < hz; i++) {
-        if (g.step(69, false, 1 / hz, 1) === 10 && switchedAt < 0) switchedAt = t;
-        t += 1 / hz;
-      }
-      expect(switchedAt).toBeCloseTo(0.2, 6);
-    }
+  it("without a beat, switches 0.2 s hold + 1 s wait after the note settles, at 60 Hz and 120 Hz", () => {
+    expect(switchFrame(() => 69, () => false, 60, 10)).toBe(72);
+    expect(switchFrame(() => 69, () => false, 120, 10)).toBe(144);
+  });
+
+  it("switches on the first beat once the candidate has held 0.2 s", () => {
+    expect(switchFrame(() => 69, (i) => i === 30, 60, 10)).toBe(30);
+    expect(switchFrame(() => 69, (i) => i === 12, 60, 10)).toBe(12);
+    expect(switchFrame(() => 69, () => true, 120, 10)).toBe(24);
+  });
+
+  it("does not switch on a beat that comes before the hold is over", () => {
+    const g = createModeGate(6);
+    for (let i = 0; i <= 11; i++) expect(g.step(69, i === 5 || i === 11, 1 / 60, 1)).toBe(6);
+    expect(switchFrame(() => 69, (i) => i === 5, 60, 10)).toBe(72);
+  });
+
+  it("restarts the hold and the wait when the candidate changes while a figure is pending", () => {
+    const midi = (/** @type {number} */ i) => (i < 40 ? 69 : 72); // index 10, then 12
+    expect(switchFrame(midi, (i) => i === 45, 60, 12)).toBe(112); // beat at 45 is inside the new hold
+    expect(switchFrame(midi, (i) => i === 45 || i === 52, 60, 12)).toBe(52);
+    expect(switchFrame(midi, () => false, 60, 10)).toBe(-1);
+  });
+
+  it("clears a pending figure when the note drops out", () => {
+    const g = createModeGate(6);
+    for (let i = 0; i < 30; i++) g.step(69, false, 1 / 60, 1); // pending, waiting for a beat
+    expect(g.step(NaN, false, 1 / 60, 1)).toBe(6);
+    expect(g.step(69, true, 1 / 60, 1)).toBe(6); // hold starts over
+    for (let i = 0; i < 11; i++) expect(g.step(69, false, 1 / 60, 1)).toBe(6);
+    expect(g.step(69, true, 1 / 60, 1)).toBe(10);
   });
 
   it("does not switch on a candidate that keeps changing", () => {
     const g = createModeGate(6);
-    for (let i = 0; i < 60; i++) expect(g.step(i % 10 < 5 ? 69 : 72, false, 1 / 60, 1)).toBe(6);
-  });
-
-  it("switches at once on an onset with a valid candidate", () => {
-    const g = createModeGate(6);
-    expect(g.step(69, true, 1 / 60, 1)).toBe(10);
-    expect(g.step(NaN, true, 1 / 60, 1)).toBe(10);
+    for (let i = 0; i < 120; i++) expect(g.step(i % 10 < 5 ? 69 : 72, true, 1 / 60, 1)).toBe(6);
   });
 });
