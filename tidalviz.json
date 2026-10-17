@@ -53,6 +53,24 @@
         { "id": "chatter", "type": "number", "label": "Pen chatter", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
         { "id": "speed", "type": "number", "label": "Speed", "min": 0.25, "max": 2, "step": 0.05, "default": 1 }
       ]
+    },
+    {
+      "id": "misregister",
+      "name": "Misregister",
+      "description": "A risograph poster on a Swiss grid: each pitch class owns a flat shape printed as a three-colour halftone. Chords swell their shapes, kicks knock the plates out of register, and every few bars the layout slides to a new composition.",
+      "author": "Fieldwork",
+      "entry": "src/misregister.js",
+      "renderer": "webgl2",
+      "thumbnail": "thumbs/misregister.jpg",
+      "params": [
+        { "id": "palette", "type": "select", "label": "Palette", "options": ["riso", "bauhaus", "sunset", "mono"], "default": "riso" },
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["cream", "white", "kraft", "none"], "default": "cream" },
+        { "id": "screen", "type": "number", "label": "Screen ruling", "min": 30, "max": 160, "step": 1, "default": 90 },
+        { "id": "misregister", "type": "number", "label": "Misregister", "min": 0, "max": 1, "step": 0.01, "default": 0.5 },
+        { "id": "grain", "type": "number", "label": "Grain", "min": 0, "max": 1, "step": 0.01, "default": 0.4 },
+        { "id": "relayout", "type": "select", "label": "Re-layout", "options": ["8 bars", "16 bars", "32 bars", "never"], "default": "8 bars" },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 }
+      ]
     }
   ]
 }
