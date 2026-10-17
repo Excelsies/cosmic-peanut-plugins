@@ -1,0 +1,24 @@
+{
+  "apiVersion": 1,
+  "visualizers": [
+    {
+      "id": "miura",
+      "name": "Miura",
+      "description": "One sheet of Miura-ori folded paper fills the window under a low raking light: the bass folds it deeper and the whole sheet contracts, every hit rolls a fold wave across it from where the sound sits, and the light swings round every eight bars.",
+      "author": "Fieldwork",
+      "entry": "src/miura/miura.js",
+      "renderer": "three",
+      "libs": ["three"],
+      "thumbnail": "thumbs/miura.jpg",
+      "params": [
+        { "id": "paper", "type": "select", "label": "Paper", "options": ["washi", "indigo", "vermilion", "foil", "graphite"], "default": "washi" },
+        { "id": "pleat", "type": "select", "label": "Pleat", "options": ["classic", "fine", "bold"], "default": "classic" },
+        { "id": "sheet", "type": "select", "label": "Sheet", "options": ["fill", "float"], "default": "fill" },
+        { "id": "fold", "type": "number", "label": "Fold", "min": 0.2, "max": 1.5, "step": 0.05, "default": 1 },
+        { "id": "reactivity", "type": "number", "label": "Reactivity", "min": 0, "max": 2, "step": 0.05, "default": 1 },
+        { "id": "light", "type": "select", "label": "Light", "options": ["window", "noon", "low-sun"], "default": "window" },
+        { "id": "shadows", "type": "boolean", "label": "Shadows", "default": true }
+      ]
+    }
+  ]
+}
