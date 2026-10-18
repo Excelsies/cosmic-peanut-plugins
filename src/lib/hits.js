@@ -17,7 +17,7 @@
  * and it hits (fires) only as a kick or a noise burst:
  *   kick   A or K with the bass dominating (low − whole spectrum ≥ SHARE_DB) and the body rising
  *          BODY_DB, or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum whose
- *          1–5 kHz flatness is FLAT_KICK or more
+ *          1–5 kHz flatness is FLAT_KICK or more; or any A or K rise of K_HUGE dB
  *   noise  a mid rise of FLUX_MIN dB on a not hat-like spectrum whose 1–5 kHz flatness (geometric
  *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more
  * Any other candidate, and a host onset of strength ≥ C_MIN on a non-hat spectrum, is a soft hit
@@ -35,7 +35,7 @@
  *
  * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 70–87%
  * of the hops on the four drum-driven songs land on a reference kick or snare (was 45–70%) and
- * 73–98% of their reference kicks hop; synthetic hats, cowbells and rides alone take 0–4% of the
+ * 75–98% of their reference kicks hop; synthetic hats, cowbells and rides alone take 0–4% of the
  * hops (12% on hip-hop at 144 fps) except on edm128 (16–21%: its pumping bass under open hats).
  * `step` allocates nothing.
  */
@@ -93,6 +93,8 @@ export const CLICK_DB = 1;
 export const K_FLUX = 3;
 export const K_RISE = 3;
 export const K_FLOOR = -30;
+/** A low rise this big (dB) is a kick on its own, body, click and share or not (a pure sine kick). */
+export const K_HUGE = 20;
 
 /** Spectrum bin of `hz` (2048-point FFT). @param {number} hz @param {number} sampleRate */
 export function binOf(hz, sampleRate) {
@@ -327,7 +329,8 @@ export function createHits() {
       const c = audio.onset === true && unit(num(audio.onsetStrength, 0)) >= C_MIN && !hatLike;
       // Only a kick or a noise burst hops; any other candidate is a soft hit (drive pulse, no hop).
       const flat = flatness(s, bins[2], bins[3]);
-      const kick = (a || k) && xl - xf >= SHARE_DB && (body.flux >= BODY_DB || (mid.flux >= CLICK_DB && flat >= FLAT_KICK && !hatLike));
+      const kick =
+        (a || k) && ((xl - xf >= SHARE_DB && (body.flux >= BODY_DB || (mid.flux >= CLICK_DB && flat >= FLAT_KICK && !hatLike))) || low.flux >= K_HUGE);
       const noise = mid.flux >= FLUX_MIN && !hatLike && flat >= FLAT_MIN;
       const since = t - lastFire;
       const again = since >= REFIRE - 1e-9 || (rises.low > winRise && out.weight < REFIRE_W) || rises.broad >= BROAD_SHARE;

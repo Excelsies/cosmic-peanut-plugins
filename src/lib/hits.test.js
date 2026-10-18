@@ -22,6 +22,7 @@ import {
   HIST,
   K_FLOOR,
   K_FLUX,
+  K_HUGE,
   K_RISE,
   LOW_HZ,
   MID_HZ,
@@ -198,6 +199,7 @@ describe("hits constants", () => {
     expect([W_RISE_LO, W_RISE_HI, MID_SPLIT, BROAD_DB, BROAD_SHARE, REFIRE_W, A_FLOOR]).toEqual([1, 3.5, 8, 6, 0.5, 0.65, -40]);
     expect([FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR]).toEqual(TUNED_GATE);
     expect(BODY_HZ).toEqual([150, 400]);
+    expect(K_HUGE).toBe(20);
   });
 
   it("measures the flatness of every FLAT_STEP-th bin: 1 for even noise, near 0 for a few harmonics", () => {
@@ -489,6 +491,16 @@ describe("createHits: only kicks and noise bursts hop", () => {
     const voice = floor(260, { mid: -20 }).map(tonal);
     setFrames(voice, 200, 3, { low: -26, body: -34, lowTop: -34 });
     expect(run(voice).fires).toEqual([]);
+  });
+
+  it("hops on a low rise of K_HUGE dB or more as a kick, with no body, click or bass share (a pure sine kick)", () => {
+    const quiet = (/** @type {Frame} */ f) => ({ ...f, tonal: true, body: -50, mid: -20, low: -55 });
+    const sine = floor(260).map(quiet);
+    setFrames(sine, 200, 3, { low: -55 + K_HUGE + 1 });
+    expect(run(sine).fires).toEqual([sine[200].t]);
+    const smaller = floor(260).map(quiet);
+    setFrames(smaller, 200, 3, { low: -55 + K_HUGE - 2 });
+    expect(run(smaller).fires).toEqual([]);
   });
 
   it("hops on a kick over a constant heavy bass whose busy low band keeps the z score under Z", () => {
