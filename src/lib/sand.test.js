@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createPlateDrive, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
+import { createHop, createPlateDrive, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -245,21 +245,23 @@ describe("createPlateDrive", () => {
   });
 
   it("exports the pulse constants", () => {
-    expect([K_PULSE, PULSE_TAU, PULSE_BASE, DRIVE_PEAK, DRIVE_KNEE]).toEqual([1, 0.12, 0.4, 3, 1]);
+    expect([K_PULSE, PULSE_TAU, PULSE_BASE, DRIVE_PEAK, DRIVE_KNEE, DRIVE_CEIL]).toEqual([1.5, 0.12, 0.4, 3, 1.25, 2]);
   });
 
   it("pulses the drive on a hit by 0.4 + 0.6·weight, decaying with τ 0.12 s, and to 0 on silence", () => {
     const steady = audio({ midAtt: 1, rms: 0.1 }); // drive 0.9
+    // The pulse fills the headroom to the 3·reactivity cap smoothly.
+    const pulsed = (/** @type {number} */ p) => 0.9 + 2.1 * Math.tanh((1.5 * p * 0.9) / 2.1);
     for (const w of [0, 0.5, 1]) {
       const d = createPlateDrive();
       for (let i = 0; i < 240; i++) d.step(steady, 0, 1, true, 1, NONE, DT);
       const p = 0.4 + 0.6 * w;
       let s = d.step(steady, 0, 1, true, 1, hit(true, w), DT);
       expect(s.pulse).toBeCloseTo(p, 9);
-      expect(s.drive).toBeCloseTo(0.9 * (1 + p), 6);
+      expect(s.drive).toBeCloseTo(pulsed(p), 6);
       s = d.step(steady, 0, 1, true, 1, NONE, DT);
       expect(s.pulse).toBeCloseTo(p * Math.exp(-DT / 0.12), 9);
-      expect(s.drive).toBeCloseTo(0.9 * (1 + s.pulse), 6);
+      expect(s.drive).toBeCloseTo(pulsed(s.pulse), 6);
       // a grow lifts it, a lighter hit doesn't lower it
       s = d.step(steady, 0, 1, true, 1, hit(false, 1, true), DT);
       expect(s.pulse).toBeCloseTo(1, 9);
@@ -270,7 +272,7 @@ describe("createPlateDrive", () => {
     }
   });
 
-  it("keeps room for the pulse on loud songs: the base kneels toward 1.5·reactivity, so a full pulse doubles it within 3·reactivity", () => {
+  it("never drops below the unpulsed drive: the base kneels above 1.25·reactivity toward 2, and a hit fills the rest up to 3·reactivity", () => {
     for (const react of [0.5, 2]) {
       /** @param {number} rms */
       const settle = (rms) => {
@@ -279,18 +281,22 @@ describe("createPlateDrive", () => {
         let s = d.step(au, 0, react, true, 1, NONE, DT);
         for (let i = 0; i < 240; i++) s = d.step(au, 0, react, true, 1, NONE, DT);
         const quiet = s.drive;
-        return { quiet, hit: d.step(au, 0, react, true, 1, hit(true, 1), DT).drive };
+        return { quiet, light: d.step(au, 0, react, true, 1, hit(true, 0), DT).drive, full: d.step(au, 0, react, true, 1, hit(true, 1), DT).drive };
       };
       let last = 0;
       for (const rms of [0, 0.05, 0.125, 0.25, 0.375]) {
-        const { quiet, hit: loud } = settle(rms);
+        const { quiet, light, full } = settle(rms);
         const base = Math.min(1 + 4 * rms, 2.5);
-        if (base <= 1) expect(quiet).toBeCloseTo(base * react, 6); // untouched up to the knee
-        else expect(quiet).toBeLessThan(Math.min(base, 1.5) * react);
+        if (base <= 1.25) expect(quiet).toBeCloseTo(base * react, 6); // untouched up to the knee
+        else expect(quiet).toBeLessThan(Math.min(base, 2) * react);
         expect(quiet).toBeGreaterThan(last); // still louder for a louder song
         last = quiet;
-        expect(loud).toBeCloseTo(2 * quiet, 6); // never clipped
-        expect(loud).toBeLessThanOrEqual(3 * react + 1e-9);
+        const kb = quiet;
+        const head = 3 * react - kb;
+        expect(full).toBeCloseTo(kb + head * Math.tanh((1.5 * kb) / head), 6);
+        expect(light).toBeGreaterThan(kb); // a weightless hit shakes it too
+        expect(full).toBeGreaterThanOrEqual(base * react - 1e-9); // a full hit at least the unkneed base (bbec764's drive)
+        expect(full).toBeLessThanOrEqual(3 * react + 1e-9);
       }
     }
   });
