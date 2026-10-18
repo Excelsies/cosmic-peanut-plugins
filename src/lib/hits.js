@@ -15,11 +15,16 @@
  *      dB or louder, whatever its z score (a kick over a busy, heavy bass line)
  *   S  a mid rise (z ≥ Z, ≥ FLUX_MIN dB) on a spectrum that is not hat-like (mid − high < S_HAT_DB)
  * and it hits (fires) only as a kick or a noise burst:
- *   kick   A or K with the bass dominating (low − whole spectrum ≥ SHARE_DB) and the body rising
- *          BODY_DB, or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum whose
- *          1–5 kHz flatness is FLAT_KICK or more; or any A or K rise of K_HUGE dB
+ *   kick   an A rise with the bass dominating (low − whole spectrum ≥ SHARE_DB) and the body rising
+ *          BODY_DB now or up to BODY_WIN s before (a kick's pitch falls through the body into the
+ *          bass), or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum whose
+ *          1–5 kHz flatness is FLAT_KICK or more; or an A rise of K_HUGE dB; or a kick into a ringing
+ *          808, which can dip the band: a mean rise per low bin of R_RISE dB with a body rise of
+ *          R_BODY dB, a mid rise of R_MID dB on a not hat-like spectrum, the bass dominating and the
+ *          low band at K_FLOOR dB or louder
  *   noise  a mid rise of FLUX_MIN dB on a not hat-like spectrum whose 1–5 kHz flatness (geometric
- *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more
+ *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more, with A, K or S
+ * or a K rise with the bass dominating and the body or click rising, or of K_HUGE dB, is a kick too.
  * Any other candidate, and a host onset of strength ≥ C_MIN on a non-hat spectrum, is a soft hit
  * (`soft`, at most one per REFRACTORY s): a vocal or synth attack, an 808 note, a sidechained bass
  * swelling back, a hat; Chladni gives it a drive pulse but no hop. Hits are at least REFRACTORY s
@@ -33,10 +38,10 @@
  * low end fills it) the level and the rise are their highest so far, and a heavier result grows the
  * weight.
  *
- * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 67–86%
- * of the hops on the four drum-driven songs land on a reference kick or snare (was 45–70%) and
- * 75–98% of their reference kicks hop; synthetic hats, cowbells and rides alone take 0–4% of the
- * hops (12% on hip-hop at 144 fps) except on edm128 (16–21%: its pumping bass under open hats).
+ * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 66–86%
+ * of the hops on the four drum-driven songs land on a reference kick or snare and 82–98% of their
+ * reference kicks hop; synthetic hats, cowbells and rides alone take 0–3% of the hops (12% on hip-hop
+ * at 144 fps) except on edm128 (17–21%: its pumped reese bass swelling back between kicks).
  * `step` allocates nothing.
  */
 
@@ -95,6 +100,12 @@ export const K_RISE = 3;
 export const K_FLOOR = -30;
 /** A low rise this big (dB) is a kick on its own, body, click and share or not (a pure sine kick). */
 export const K_HUGE = 20;
+/** Seconds the kick body may rise before an A rise and still count (the kick's pitch falls through it). */
+export const BODY_WIN = 0.04;
+/** A kick into a ringing 808: mean rise per low bin R_RISE dB, body rise R_BODY dB and mid rise R_MID dB. */
+export const R_RISE = 6;
+export const R_BODY = 5;
+export const R_MID = 2;
 
 /** Spectrum bin of `hz` (2048-point FFT). @param {number} hz @param {number} sampleRate */
 export function binOf(hz, sampleRate) {
@@ -275,6 +286,7 @@ export function createHits() {
   let fireT = -Infinity;
   let winLevel = -Infinity; // highest low level and rise since the fire (weight window)
   let winRise = 0;
+  let bodyT = -Infinity; // last frame the kick body rose BODY_DB
   const out = { fire: false, grow: false, soft: false, weight: 0 };
   return {
     out,
@@ -294,7 +306,7 @@ export function createHits() {
       const t = Number.isFinite(audio.hostTime) ? audio.hostTime : (lastT === -Infinity ? 0 : lastT) + sinceNew;
       sinceNew = 0;
       if (audio.silent === true) return out;
-      if (t < lastT) lastFire = lastSoft = fireT = -Infinity; // host clock went back
+      if (t < lastT) lastFire = lastSoft = fireT = bodyT = -Infinity; // host clock went back
       lastT = t;
       const sr = num(audio.sampleRate, 48000);
       if (sr !== rate) {
@@ -329,13 +341,19 @@ export function createHits() {
       const c = audio.onset === true && unit(num(audio.onsetStrength, 0)) >= C_MIN && !hatLike;
       // Only a kick or a noise burst hops; any other candidate is a soft hit (drive pulse, no hop).
       const flat = flatness(s, bins[2], bins[3]);
-      const kick =
-        (a || k) && ((xl - xf >= SHARE_DB && (body.flux >= BODY_DB || (mid.flux >= CLICK_DB && flat >= FLAT_KICK && !hatLike))) || low.flux >= K_HUGE);
+      const share = xl - xf >= SHARE_DB;
+      if (body.flux >= BODY_DB) bodyT = t;
+      const click = mid.flux >= CLICK_DB && flat >= FLAT_KICK && !hatLike;
+      const huge = low.flux >= K_HUGE;
+      const r = rises.low >= R_RISE && body.flux >= R_BODY && mid.flux >= R_MID;
       const noise = mid.flux >= FLUX_MIN && !hatLike && flat >= FLAT_MIN;
+      const kickA = (a && ((share && (t - bodyT <= BODY_WIN + 1e-9 || click)) || huge)) || (r && !hatLike && share && xl >= K_FLOOR);
+      const kickK = k && ((share && (body.flux >= BODY_DB || click)) || huge);
+      const now = kickA || kickK || (noise && (a || k || sm || r));
       const since = t - lastFire;
       const again = since >= REFIRE - 1e-9 || (rises.low > winRise && out.weight < REFIRE_W) || rises.broad >= BROAD_SHARE;
       const cand = a || k || sm;
-      if (!(cand && (kick || noise))) {
+      if (!now) {
         // A soft hit, at most one per REFRACTORY s (and none inside a hop's).
         out.soft = (cand || c) && since >= REFRACTORY - 1e-9 && t - lastSoft >= REFRACTORY - 1e-9;
         if (out.soft) lastSoft = t;

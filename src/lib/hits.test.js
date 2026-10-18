@@ -7,6 +7,7 @@ import {
   binOf,
   BODY_DB,
   BODY_HZ,
+  BODY_WIN,
   BROAD_DB,
   BROAD_SHARE,
   C_MIN,
@@ -28,6 +29,9 @@ import {
   MID_HZ,
   MID_SPLIT,
   midSplit,
+  R_BODY,
+  R_MID,
+  R_RISE,
   REFIRE,
   REFIRE_W,
   REFRACTORY,
@@ -200,6 +204,7 @@ describe("hits constants", () => {
     expect([FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR]).toEqual(TUNED_GATE);
     expect(BODY_HZ).toEqual([150, 400]);
     expect(K_HUGE).toBe(20);
+    expect([BODY_WIN, R_RISE, R_BODY, R_MID]).toEqual([0.04, 6, 5, 2]);
   });
 
   it("measures the flatness of every FLAT_STEP-th bin: 1 for even noise, near 0 for a few harmonics", () => {
@@ -510,6 +515,50 @@ describe("createHits: only kicks and noise bursts hop", () => {
     for (let k = 300; k < 303; k++) Object.assign(fr[k], { low: -14 + K_FLUX + 1.5, body: -30, lowTop: -30 });
     const r = run(fr);
     expect(r.fires).toEqual([fr[300].t]);
+  });
+
+  it("takes a kick body that rose up to BODY_WIN s before the bass (the kick's pitch falls) for a kick, at 60 and 144 fps", () => {
+    const tonal = (/** @type {Frame} */ f) => ({ ...f, tonal: true, body: -50, lowTop: -50 });
+    /** @param {number} bodyAt frame the body comes up (and stays) */
+    const kick = (bodyAt) => {
+      const fr = floor(260).map(tonal);
+      setFrames(fr, bodyAt, 260 - bodyAt, { body: -34 });
+      return setFrames(fr, 200, 3, { low: -26 });
+    };
+    // Up 3 frames (32 ms) before: by the bass's frame the body has stopped rising, but it came with the kick.
+    const close = kick(197);
+    expect(run(close).fires).toEqual([close[200].t]);
+    for (const fps of [60, 144]) {
+      const f = runAt(close, fps);
+      expect(f).toHaveLength(1);
+      expect(f[0].t - close[200].t).toBeGreaterThanOrEqual(0);
+      expect(f[0].t - close[200].t).toBeLessThan(0.02);
+    }
+    // Up 7 frames (75 ms) before: a note's body, not this hit's.
+    const early = kick(193);
+    const r = run(early);
+    expect(r.fires).toEqual([]);
+    expect(r.softs).toEqual([early[200].t]);
+  });
+
+  it("hops on a kick into a ringing 808 that dips the band: its bins rise, with the body and a click", () => {
+    // The top low bin is also the body band's lowest; it stays quiet so the body band is the body alone.
+    const ring = [-14, -16, -22, -40, -40, -60];
+    const into = [-17, -19, -25, -20, -20, -60]; // the low bins rise by 6.7 dB on average; the band dips 1 dB
+    /** @param {Partial<Frame>} hit */
+    const make = (hit) => {
+      const fr = floor(260, { flat: true }).map((f) => ({ ...f, lowBins: ring, tonal: true, body: -50 }));
+      setFrames(fr, 200, 1, { lowBins: into, ...hit });
+      return setFrames(fr, 201, 59, { lowBins: ring });
+    };
+    const kick = make({ body: -50 + R_BODY + 1, mid: -40 + R_MID + 2 });
+    expect(run(kick).fires).toEqual([kick[200].t]);
+    // No click: the 808's own next note, not a kick.
+    const note = make({ body: -50 + R_BODY + 1 });
+    expect(run(note).fires).toEqual([]);
+    // No body: a tonal attack over the 808.
+    const attack = make({ mid: -40 + R_MID + 2 });
+    expect(run(attack).fires).toEqual([]);
   });
 });
 
