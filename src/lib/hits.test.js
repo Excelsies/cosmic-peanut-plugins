@@ -21,6 +21,7 @@ import {
   FLUX_SPAN,
   HIGH_HZ,
   HIST,
+  HUGE_SHARE_DB,
   K_FLOOR,
   K_FLUX,
   K_HUGE,
@@ -208,7 +209,7 @@ describe("hits constants", () => {
     expect([W_RISE_LO, W_RISE_HI, MID_SPLIT, BROAD_DB, BROAD_SHARE, REFIRE_W, A_FLOOR]).toEqual([1, 3.5, 8, 6, 0.5, 0.65, -40]);
     expect([FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR]).toEqual(TUNED_GATE);
     expect(BODY_HZ).toEqual([150, 400]);
-    expect(K_HUGE).toBe(20);
+    expect([K_HUGE, HUGE_SHARE_DB]).toEqual([20, -8]);
     expect([BODY_WIN, K_WAIT, R_RISE, R_BODY, R_MID]).toEqual([0.04, 0.035, 6, 5, 2]);
     expect([NOISE_WIN, NOISE_Q, NOISE_REL, NOISE_MIN]).toEqual([6, 0.9, 0.25, 8]);
   });
@@ -504,14 +505,25 @@ describe("createHits: only kicks and noise bursts hop", () => {
     expect(run(voice).fires).toEqual([]);
   });
 
-  it("hops on a low rise of K_HUGE dB or more as a kick, with no body, click or bass share (a pure sine kick)", () => {
-    const quiet = (/** @type {Frame} */ f) => ({ ...f, tonal: true, body: -50, mid: -20, low: -55 });
-    const sine = floor(260).map(quiet);
-    setFrames(sine, 200, 3, { low: -55 + K_HUGE + 1 });
+  it("hops on a low rise of K_HUGE dB or more as a kick, with no body or click (a pure sine kick), unless the bass stays HUGE_SHARE_DB under the spectrum", () => {
+    // The low band's top bin (shared with the body band) keeps its floor level, so the body never rises.
+    const top = -55 - 10 * Math.log10(LOW_BINS[1] - LOW_BINS[0] + 1);
+    /** @param {number} mid @param {number} rise */
+    const make = (mid, rise) => {
+      const fr = floor(260).map((f) => ({ ...f, tonal: true, body: -50, mid, low: -55 }));
+      return setFrames(fr, 200, 3, { low: -55 + rise, lowTop: top });
+    };
+    const sine = make(-40, K_HUGE + 2);
     expect(run(sine).fires).toEqual([sine[200].t]);
-    const smaller = floor(260).map(quiet);
-    setFrames(smaller, 200, 3, { low: -55 + K_HUGE - 2 });
-    expect(run(smaller).fires).toEqual([]);
+    expect(run(make(-40, K_HUGE - 2)).fires).toEqual([]);
+    // The same rise 14 dB under a loud mix (a bass note coming in under a voice): a soft hit.
+    const under = make(-20, K_HUGE + 2);
+    const r = run(under);
+    expect(r.fires).toEqual([]);
+    expect(r.softs).toEqual([under[200].t]);
+    // 6 dB under the spectrum still hops.
+    const near = make(-27, K_HUGE + 2);
+    expect(run(near).fires).toEqual([near[200].t]);
   });
 
   it("hops on a kick over a constant heavy bass whose busy low band keeps the z score under Z", () => {

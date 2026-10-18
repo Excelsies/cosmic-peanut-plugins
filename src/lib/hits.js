@@ -18,7 +18,8 @@
  *   kick   an A rise with the bass dominating (low − whole spectrum ≥ SHARE_DB) and the body rising
  *          BODY_DB now or up to BODY_WIN s before (a kick's pitch falls through the body into the
  *          bass), or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum whose
- *          1–5 kHz flatness is FLAT_KICK or more; or an A rise of K_HUGE dB; or a kick into a ringing
+ *          1–5 kHz flatness is FLAT_KICK or more; or an A rise of K_HUGE dB with the low level at most
+ *          -HUGE_SHARE_DB dB under the whole spectrum's (not a bass note under a loud mix); or a kick into a ringing
  *          808, which can dip the band: a mean rise per low bin of R_RISE dB with a body rise of
  *          R_BODY dB, a mid rise of R_MID dB on a not hat-like spectrum, the bass dominating and the
  *          low band at K_FLOOR dB or louder
@@ -104,8 +105,12 @@ export const CLICK_DB = 1;
 export const K_FLUX = 3;
 export const K_RISE = 3;
 export const K_FLOOR = -30;
-/** A low rise this big (dB) is a kick on its own, body, click and share or not (a pure sine kick). */
+/**
+ * A low rise this big (dB) is a kick on its own, body and click or not (a pure sine kick), unless the
+ * low level stays HUGE_SHARE_DB or more under the whole spectrum's (a bass note coming in under a loud mix).
+ */
 export const K_HUGE = 20;
+export const HUGE_SHARE_DB = -8;
 /** Seconds the kick body may rise before an A rise and still count (the kick's pitch falls through it). */
 export const BODY_WIN = 0.04;
 /** Seconds within which the next analysis frame must confirm a K-only kick (its low level holding or rising). */
@@ -404,7 +409,7 @@ export function createHits() {
       const share = xl - xf >= SHARE_DB;
       if (body.flux >= BODY_DB) bodyT = t;
       const click = mid.flux >= CLICK_DB && flat >= FLAT_KICK && !hatLike;
-      const huge = low.flux >= K_HUGE;
+      const huge = low.flux >= K_HUGE && xl - xf >= HUGE_SHARE_DB;
       const r = rises.low >= R_RISE && body.flux >= R_BODY && mid.flux >= R_MID;
       const noise = mid.flux >= FLUX_MIN && !hatLike && flat >= FLAT_MIN;
       const bodyNear = t - bodyT <= BODY_WIN + 1e-9;
