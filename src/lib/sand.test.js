@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createHopQueue, createPlateDrive, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
+import { createHop, createHopQueue, createPlateDrive, LIFT, LIFT_DIR, LIFT_POW, liftOffset, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -69,7 +69,7 @@ function hitTrain(period, reduce, dt = DT, seconds = 4, w = 1) {
 
 describe("hop", () => {
   it("exports the hop constants", () => {
-    expect([F_MIN, SCATTER, W_HAZE, HAZE_PEAK]).toEqual([0.3, 0.12, 0.7, 0.25]);
+    expect([F_MIN, SCATTER, W_HAZE, HAZE_PEAK]).toEqual([0.5, 0.12, 0.7, 0.25]);
   });
 
   it("launches grains for a 0.15 s flight at Hop 1 and full weight", () => {
@@ -87,7 +87,7 @@ describe("hop", () => {
           continue;
         }
         expect(h.impulse).toBeCloseTo(GRAVITY * 0.075 * hopParam * (0.4 + 0.6 * w), 9);
-        expect(h.fraction).toBeCloseTo(0.3 + 0.7 * w, 9);
+        expect(h.fraction).toBeCloseTo(0.5 + 0.5 * w, 9);
         expect(h.scatter).toBeCloseTo(0.12 * hopParam * w * w, 9);
       }
     }
@@ -96,16 +96,16 @@ describe("hop", () => {
   it("counts a new hop only on a fire; a grow re-sends a bigger hop under the same seq", () => {
     const hop = createHop();
     const a = hop.step(hit(true, 0.3), 1, DT, true);
-    expect([a.seq, a.fraction, a.launched]).toEqual([1, expect.closeTo(0.51, 9), 0]);
+    expect([a.seq, a.fraction, a.launched]).toEqual([1, expect.closeTo(0.65, 9), 0]);
     const b = hop.step(hit(false, 0.6, true), 1, DT, true);
     expect(b).toBe(a);
     expect(b.seq).toBe(1);
-    expect(b.fraction).toBeCloseTo(0.72, 9);
+    expect(b.fraction).toBeCloseTo(0.8, 9);
     expect(b.impulse).toBeCloseTo(hopVz0(1, 0.6), 9);
     // The grow names the share already launched, so only the grains between the two shares go up
     // (a short flight may have landed already: they must not hop twice).
-    expect(b.launched).toBeCloseTo(0.51, 9);
-    expect(hop.step(hit(false, 0.9, true), 1, DT, true).launched).toBeCloseTo(0.72, 9);
+    expect(b.launched).toBeCloseTo(0.65, 9);
+    expect(hop.step(hit(false, 0.9, true), 1, DT, true).launched).toBeCloseTo(0.8, 9);
     const c = hop.step(NONE, 1, DT, true);
     expect([c.impulse, c.scatter, c.fraction, c.seq, c.launched]).toEqual([0, 0, 0, 1, 0]);
     for (let i = 0; i < 20; i++) hop.step(NONE, 1, DT, true);
@@ -139,7 +139,7 @@ describe("hop", () => {
     const before = hop.step(NONE, 1, DT, true).haze;
     const h = hop.step(hit(true, 1), 1, DT, true);
     expect(h.seq).toBe(2);
-    expect(h.fraction).toBeCloseTo(0.3 + 0.7 * 0.7, 9);
+    expect(h.fraction).toBeCloseTo(0.5 + 0.5 * 0.7, 9);
     expect(h.impulse).toBeCloseTo(hopVz0(1, 0.7), 9);
     expect(h.scatter).toBeCloseTo(0.12 * 0.49, 9);
     expect(h.haze).toBeLessThanOrEqual(before);
@@ -180,7 +180,7 @@ describe("hop", () => {
     for (let i = 0; i < 30; i++) hop.step(NONE, 1, DT, false);
     const h = hop.step(hit(true, NaN), 1, NaN, false);
     expect(h.seq).toBe(2);
-    expect(h.fraction).toBeCloseTo(0.3, 9);
+    expect(h.fraction).toBeCloseTo(F_MIN, 9);
     expect(Number.isFinite(h.haze)).toBe(true);
   });
 
@@ -195,6 +195,28 @@ describe("hop", () => {
 
 /** @param {Partial<Record<string, any>>} over */
 const audio = (over = {}) => ({ midAtt: 1, rms: 0.1, silent: false, trebAtt: 1, flux: 0, bassAtt: 1, ...over });
+
+describe("liftOffset", () => {
+  it("lifts airborne grains on screen by LIFT·z^LIFT_POW plate heights, up and a little toward the light", () => {
+    expect([LIFT, LIFT_POW]).toEqual([0.4, 0.5]);
+    expect(Math.hypot(LIFT_DIR[0], LIFT_DIR[1])).toBeCloseTo(1, 6);
+    expect(LIFT_DIR[1]).toBeGreaterThan(0.9); // up
+    expect(LIFT_DIR[0]).toBeLessThan(0); // toward the light at the upper left
+    const u = new Float32Array(3);
+    for (const aspect of [16 / 9, 1, 0.5]) {
+      expect(liftOffset(aspect, u)).toBe(u);
+      expect(u[0]).toBeCloseTo((LIFT * LIFT_DIR[0]) / aspect, 6); // plate x is stretched by the aspect
+      expect(u[1]).toBeCloseTo(LIFT * LIFT_DIR[1], 6);
+      expect(u[2]).toBe(LIFT_POW);
+    }
+    liftOffset(0, u);
+    expect(Number.isFinite(u[0])).toBe(true);
+    // a weight-0 hop at Hop 1 peaks at z = vz0²/2g: about 1/2.5 of a full-weight hop's lift
+    const peak = (/** @type {number} */ w) => LIFT * (hopVz0(1, w) ** 2 / (2 * GRAVITY)) ** LIFT_POW;
+    expect(peak(0) / peak(1)).toBeCloseTo(0.4, 6);
+    expect(peak(1)).toBeCloseTo(0.0424, 3); // 31 px of a 720 px window
+  });
+});
 
 describe("createHopQueue", () => {
   /** @param {number} impulse @param {number} fraction @param {number} launched @param {number} seq */

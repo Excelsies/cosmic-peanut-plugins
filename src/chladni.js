@@ -12,7 +12,8 @@
  * lies.
  *
  * Per frame: 1–4 feedback steps (1/120 s each), one additive POINTS pass into a half-resolution
- * density target, one full-resolution composite (brushed plate, relief-lit sand, dust). Every
+ * density target, a second one that draws the airborne grains lifted by their height (lift.vert),
+ * one full-resolution composite (brushed plate, relief-lit sand, dust). Every
  * uniform comes from a preallocated array or a scalar, so frame() allocates nothing.
  */
 import { createFixedStep } from "./lib/fixedstep.js";
@@ -34,6 +35,7 @@ import {
   K_DRIFT,
   K_FIZZ,
   K_SHAKE,
+  liftOffset,
   MAX_STEPS,
   RESTITUTION,
   seedGrains,
@@ -44,9 +46,8 @@ import { createStereo, stereoFrame } from "./lib/stereo.js";
 
 /** Density target resolution relative to the canvas: sand is soft at this scale once lit. */
 const DENSITY_SCALE = 0.5;
-/** Density weights per grain at the reference (1280×720 density, 64k grains) on a float target. */
+/** Density weight per grain at the reference (1280×720 density, 64k grains) on a float target. */
 const W_GROUND = 0.4;
-const W_AIR = 0.25;
 /** On an RGBA8 target (no EXT_color_buffer_float) a fixed 4/255 per grain: saturates sooner. */
 const W_BYTE = 4 / 255;
 const REF_TEXELS = 1280 * 720;
@@ -56,16 +57,18 @@ const REF_GRAINS = 65536;
 export default async function create(ctx) {
   const gl = /** @type {WebGL2RenderingContext} */ (ctx.gl);
   const dir = "shaders/chladni/";
-  const [uvs, ufs, dvs, dfs, cvs, cfs] = await Promise.all(
-    ["update.vert", "update.frag", "deposit.vert", "deposit.frag", "fullscreen.vert", "composite.frag"].map((f) =>
+  const [uvs, ufs, dvs, dfs, cvs, cfs, lvs] = await Promise.all(
+    ["update.vert", "update.frag", "deposit.vert", "deposit.frag", "fullscreen.vert", "composite.frag", "lift.vert"].map((f) =>
       ctx.assets.text(dir + f),
     ),
   );
   const update = createFeedbackProgram(gl, uvs, ufs, dir + "update.vert", ["o_a", "o_b"]);
   const deposit = createProgram(gl, dvs, dfs, dir + "deposit.frag");
+  const lift = createProgram(gl, lvs, dfs, dir + "lift.vert");
   const composite = createProgram(gl, cvs, cfs, dir + "composite.frag");
   const floatTarget = Boolean(gl.getExtension("EXT_color_buffer_float"));
   const density = createTarget(gl);
+  const airborne = createTarget(gl); // the airborne grains where they show in flight (lift.vert)
 
   // Two grain buffers ping-ponged through two feedback objects; one VAO per buffer serves both the
   // update and the deposit pass (same attribute locations), plus an empty one for the composite.
@@ -128,12 +131,15 @@ export default async function create(ctx) {
   const table = new Float32Array(64 * MODE_STRIDE);
   let aspect = 1;
   const dep = new Float32Array(4);
+  const liftU = new Float32Array(3);
   function resize() {
     const w = Math.max(1, ctx.size.width);
     const h = Math.max(1, ctx.size.height);
     aspect = w / h;
     buildModeTable(aspect, table);
     density.resize(Math.max(1, Math.round(w * DENSITY_SCALE)), Math.max(1, Math.round(h * DENSITY_SCALE)));
+    airborne.resize(density.width, density.height);
+    liftOffset(aspect, liftU);
   }
   resize();
 
@@ -216,9 +222,9 @@ export default async function create(ctx) {
       const texels = density.width * density.height;
       const scale = (texels / REF_TEXELS) ** 0.75 * Math.sqrt(REF_GRAINS / count);
       dep[0] = floatTarget ? W_GROUND * scale : W_BYTE;
-      dep[1] = floatTarget ? W_AIR * scale : W_BYTE;
+      dep[1] = dep[0]; // airborne grains splat like grounded ones, so in flight they stay grains
       dep[2] = 1;
-      dep[3] = 2;
+      dep[3] = 1;
       gl.bindFramebuffer(gl.FRAMEBUFFER, density.fbo);
       gl.viewport(0, 0, density.width, density.height);
       gl.clearColor(0, 0, 0, 0);
@@ -229,6 +235,18 @@ export default async function create(ctx) {
       gl.uniform4fv(deposit.u.u_dep, dep);
       gl.bindVertexArray(vaos[cur]);
       gl.drawArrays(gl.POINTS, 0, count);
+      // 2b. The airborne grains again, lifted by their height, each carrying its light in place.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, airborne.fbo);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(lift.program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, density.tex);
+      gl.uniform1i(lift.u.u_den, 0);
+      gl.uniform2f(lift.u.u_texel, 1 / density.width, 1 / density.height);
+      gl.uniform4fv(lift.u.u_dep, dep);
+      gl.uniform3fv(lift.u.u_lift, liftU);
+      gl.drawArrays(gl.POINTS, 0, count);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       gl.disable(gl.BLEND);
 
       // 3. Composite onto the canvas.
@@ -240,16 +258,22 @@ export default async function create(ctx) {
       gl.bindVertexArray(emptyVao);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, density.tex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, airborne.tex);
+      gl.activeTexture(gl.TEXTURE0);
       const cu = composite.u;
       gl.uniform1i(cu.u_den, 0);
+      gl.uniform1i(cu.u_air, 1);
       gl.uniform2f(cu.u_texel, 1 / density.width, 1 / density.height);
       gl.uniform2f(cu.u_res, ctx.size.width, ctx.size.height);
       gl.uniform3fv(cu.u_pal, palette);
       look[2] = hp.haze;
       gl.uniform4fv(cu.u_look, look);
-      gl.uniform1f(cu.u_dustMass, dep[0] / (4 * dep[1])); // airborne points are 2×2 texels
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindVertexArray(null);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
     },
 
     resize,
@@ -268,8 +292,10 @@ export default async function create(ctx) {
       gl.deleteVertexArray(emptyVao);
       gl.deleteProgram(update.program);
       gl.deleteProgram(deposit.program);
+      gl.deleteProgram(lift.program);
       gl.deleteProgram(composite.program);
       density.dispose();
+      airborne.dispose();
     },
   };
 }

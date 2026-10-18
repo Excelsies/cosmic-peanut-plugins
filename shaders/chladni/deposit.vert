@@ -1,6 +1,6 @@
 #version 300 es
-// Splat each grain into the half-resolution density target: R = grounded sand, G = airborne dust
-// (drawn a little larger). Additive ONE, ONE.
+// Splat each grain into the half-resolution density target: R = grounded sand, G = airborne sand
+// where it took off (lift.vert reads it for the light each airborne grain carries). Additive ONE, ONE.
 precision highp float;
 layout(location = 0) in vec4 a_a;
 layout(location = 1) in vec2 a_b;

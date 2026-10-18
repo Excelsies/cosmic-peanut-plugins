@@ -15,7 +15,8 @@
  * off them, and vanishes on the nodes, so lines stay crisp. A beat hit (lib/hits.js) of weight w
  * launches F_MIN + (1 − F_MIN)·w of the grounded grains with vz0 = GRAVITY·0.075·hop·(0.4 + 0.6·w)
  * (a 0.15 s flight at full weight) and a hashed lateral scatter; airborne grains fly ballistically
- * with only AIR_DRAG and land with z = 0. Edges reflect with RESTITUTION.
+ * with only AIR_DRAG, show lifted on screen by LIFT·z^LIFT_POW (liftOffset) and land with z = 0.
+ * Edges reflect with RESTITUTION.
  */
 import { createFlashLimiter } from "./flash.js";
 import { WEIGHT_WIN } from "./hits.js";
@@ -43,7 +44,7 @@ const SILENT_TAU = 0.075;
 /** The hop's dust haze decays with this time constant (s). */
 const HAZE_TAU = 0.15;
 /** Share of the grounded grains a hop of weight 0 launches (all of them at weight 1). */
-export const F_MIN = 0.3;
+export const F_MIN = 0.5;
 /** Lateral scatter speed at weight 1 and Hop 1 (it grows with weight²). */
 export const SCATTER = 0.12;
 /** Hits heavier than this carry a haze; a bright hit the flash limiter refuses hops at this weight. */
@@ -58,6 +59,25 @@ export const PULSE_BASE = 0.4;
 export const DRIVE_PEAK = 3;
 export const DRIVE_KNEE = 1.25;
 export const DRIVE_CEIL = 2;
+/**
+ * Airborne grains show lifted by LIFT·z^LIFT_POW plate heights along LIFT_DIR (up, a little toward
+ * the light at the upper left): a weight-0 hop at Hop 1 rises about 12 px of a 720 px window, a
+ * full one about 31 px. The square root keeps small hops visible next to big ones.
+ */
+export const LIFT = 0.4;
+export const LIFT_POW = 0.5;
+export const LIFT_DIR = [-0.35 / Math.hypot(0.35, 0.94), 0.94 / Math.hypot(0.35, 0.94)];
+
+/**
+ * The flight offset uniform: plate units per height^LIFT_POW (x divided by the aspect), and LIFT_POW.
+ * @param {number} aspect width / height @param {Float32Array} out length ≥ 3
+ */
+export function liftOffset(aspect, out) {
+  out[0] = (LIFT * LIFT_DIR[0]) / (aspect > 0 ? aspect : 1);
+  out[1] = LIFT * LIFT_DIR[1];
+  out[2] = LIFT_POW;
+  return out;
+}
 
 /** @param {unknown} v @param {number} fallback */
 const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);

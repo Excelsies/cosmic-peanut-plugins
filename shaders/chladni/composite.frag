@@ -7,12 +7,12 @@ precision highp int;
 in vec2 v_uv;
 out vec4 o;
 
-uniform sampler2D u_den;  // R grounded density, G airborne density (half resolution)
+uniform sampler2D u_den;  // R grounded density, G airborne density in place (half resolution)
+uniform sampler2D u_air;  // airborne grains where they show in flight: R their light, G their density (lift.vert)
 uniform vec2 u_texel;     // 1 / density size
 uniform vec2 u_res;       // canvas size (px)
 uniform vec3 u_pal[4];    // plate bottom, plate top, sand, sand on no backdrop
 uniform vec4 u_look;      // brushing, sheen, haze envelope (flash-limited), backdrop none (0/1)
-uniform float u_dustMass; // airborne splat -> grounded splat, per grain (W_GROUND / (4 W_AIR) in chladni.js)
 
 const vec3 LIGHT = vec3(-0.6, 0.6, 0.55);
 // Backdrop none: the dust's light per grain, as a share of the sand colour, and how much the haze
@@ -72,18 +72,22 @@ void main() {
   float rim = dot(nrm.xy, normalize(l.xy)) * (1.0 - nrm.z) * 6.0; // + facing the light, - away
   float shade = clamp(0.25 + 0.75 * lam, 0.3, 1.6);
 
-  float g = (c.g * 0.4 + (e.g + w.g + n.g + s.g) * 0.15);
-  float air = 1.0 - exp(-2.0 * g);
+  vec4 ac = texture(u_air, uv);
+  vec4 ae = texture(u_air, uv + vec2(u_texel.x, 0.0));
+  vec4 aw = texture(u_air, uv - vec2(u_texel.x, 0.0));
+  vec4 an = texture(u_air, uv + vec2(0.0, u_texel.y));
+  vec4 asth = texture(u_air, uv - vec2(0.0, u_texel.y));
+  vec2 ga = ac.rg * 0.6 + (ae.rg + aw.rg + an.rg + asth.rg) * 0.1; // light, density (the sand's blur)
+  float air = 1.0 - exp(-2.0 * ga.y);
   float dust = air * mix(0.65, 1.0, u_look.z);
 
   if (u_look.w > 0.5) {
     // No plate: premultiplied sand over whatever is behind the window (matte, normal alpha).
-    // The dust covers what the same grains covered on the ground, through the same saturation
-    // (grounded density plus the airborne splat converted to grounded mass), so a hop moves light
-    // around instead of adding it: as bright on a fine figure as on a coarse one.
+    // The dust gives the light the same grains gave on the ground (lift.vert carries it along), so
+    // a hop moves light around instead of adding it: as bright on a fine figure as on a coarse one.
     vec3 sand = u_pal[3];
     vec3 lit = min(sand * shade + clamp(rim, 0.0, 1.0) * 0.35, vec3(1.0));
-    float d = min((cover(hr + g * u_dustMass) - h) * (1.0 + NONE_HAZE * u_look.z), 1.0 - h);
+    float d = min(ga.x * (1.0 + NONE_HAZE * u_look.z), 1.0 - h);
     o = vec4(lit * h + sand * DUST_LIGHT * d, h + d);
     return;
   }
