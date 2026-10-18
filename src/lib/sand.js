@@ -43,8 +43,8 @@ export const GRAVITY = 4;
 const SILENT_TAU = 0.075;
 /** The hop's dust haze decays with this time constant (s). */
 const HAZE_TAU = 0.15;
-/** Share of the grounded grains a hop of weight 0 launches (all of them at weight 1). */
-export const F_MIN = 0.5;
+/** Share of the grounded grains a hop of weight 0 launches (all of them at weight 1); a light hop stays gentle by its height and scatter. */
+export const F_MIN = 0.9;
 /** Lateral scatter speed at weight 1 and Hop 1 (it grows with weight²). */
 export const SCATTER = 0.12;
 /** Hits heavier than this carry a haze; a bright hit the flash limiter refuses hops at this weight. */
@@ -55,6 +55,8 @@ export const HAZE_PEAK = 0.25;
 export const K_PULSE = 1.5;
 export const PULSE_TAU = 0.12;
 export const PULSE_BASE = 0.4;
+/** Drive pulse of a soft hit (an onset that does not hop: a vocal or synth attack, an 808 note, a hat). */
+export const PULSE_SOFT = 0.25;
 /** The pulsed drive stays at or under DRIVE_PEAK·reactivity; the base bends above DRIVE_KNEE toward DRIVE_CEIL (per reactivity). */
 export const DRIVE_PEAK = 3;
 export const DRIVE_KNEE = 1.25;
@@ -99,10 +101,10 @@ export function flightTime(vz0) {
 }
 
 /**
- * Hit → hop. Every hit (lib/hits.js) launches F_MIN + (1 − F_MIN)·w of the grounded grains at
- * hopVz0(hop, w) with lateral scatter SCATTER·hop·w²; a grow re-sends the bigger hop under the
- * same `seq` with `launched`, the share already sent, and the shader launches only the grains in
- * between (a short flight may have landed already). Hits over W_HAZE also raise the dust haze to
+ * Hit → hop. Every hit (lib/hits.js; a soft hit never hops) launches F_MIN + (1 − F_MIN)·w of
+ * the grounded grains at hopVz0(hop, w) with lateral scatter SCATTER·hop·w²; a grow re-sends the
+ * bigger hop under the same `seq` with `launched`, the share already sent, and the shader launches
+ * only the grains in between (a short flight may have landed already). Hits over W_HAZE also raise the dust haze to
  * HAZE_PEAK·(w − W_HAZE)/(1 − W_HAZE), held through the weight window, then decaying with τ HAZE_TAU,
  * through the photosensitivity limiter (at most 3 rises per second under reduce flashing). A
  * bright hit the limiter refuses still hops, at weight W_HAZE and with no haze rise.
@@ -206,8 +208,9 @@ export function createHopQueue() {
  *   2.5)·reactivity, τ 0.1 s (pull toward the nodes and shake on the antinodes); on silence
  *   τ 0.075 s, so the sand damps and freezes within 0.3 s; the knee (pulse gain > 0 only) bends
  *   base/reactivity above DRIVE_KNEE toward DRIVE_CEIL with a tanh, so the pulse has room;
- * - pulse: on a hit, max(pulse, PULSE_BASE + (1 − PULSE_BASE)·weight), else decaying with
- *   τ PULSE_TAU; 0 on silence (the plate shakes harder on each hit, without any brightness);
+ * - pulse: on a hit, max(pulse, PULSE_BASE + (1 − PULSE_BASE)·weight), on a soft hit
+ *   max(pulse, PULSE_SOFT), else decaying with τ PULSE_TAU; 0 on silence (the plate shakes harder
+ *   on each hit, a little on the onsets that do not hop, without any brightness);
  * - fizz: clamp(trebAtt − 1, 0, 2)·0.5 + flux·0.5, unsmoothed (hats: per-grain jitter);
  * - tiltX: 0.6·balance·reactivity, τ 0.5 s (sand leans toward the louder channel; exactly 0 for
  *   mono and L = R sources);
@@ -223,7 +226,7 @@ export function createPlateDrive() {
      * @param {number} reactivity effective Reactivity
      * @param {boolean} bassTilt false under reduce motion
      * @param {number} pulseGain 0 under reduce motion's calm rule, else 1
-     * @param {{ fire: boolean, grow: boolean, weight: number }} hit createHits().out
+     * @param {{ fire: boolean, grow: boolean, weight: number, soft?: boolean }} hit createHits().out
      * @param {number} dt
      */
     step(audio, balance, reactivity, bassTilt, pulseGain, hit, dt) {
@@ -237,7 +240,7 @@ export function createPlateDrive() {
         if (hit.fire === true || hit.grow === true) {
           const p = PULSE_BASE + (1 - PULSE_BASE) * clamp(num(hit.weight, 0), 0, 1);
           if (p > out.pulse) out.pulse = p;
-        }
+        } else if (hit.soft === true && PULSE_SOFT > out.pulse) out.pulse = PULSE_SOFT;
       }
       // The knee only makes room for the pulse: with pulse gain 0 the base drives as it is. The pulse
       // then fills the headroom to the cap smoothly, so a hit never clips and a full one on a loud

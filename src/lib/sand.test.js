@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createHopQueue, createPlateDrive, LIFT, LIFT_DIR, LIFT_POW, liftOffset, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
+import { createHop, createHopQueue, createPlateDrive, LIFT, LIFT_DIR, LIFT_POW, liftOffset, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_SOFT, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -42,8 +42,9 @@ function maxPerSecond(times) {
   return best;
 }
 
-/** A hit as createHits().out gives it. @param {boolean} fire @param {number} weight @param {boolean} [grow] */
-const hit = (fire, weight, grow = false) => ({ fire, grow, weight });
+/** A hit as createHits().out gives it. @param {boolean} fire @param {number} weight @param {boolean} [grow] @param {boolean} [soft] */
+const hit = (fire, weight, grow = false, soft = false) => ({ fire, grow, soft, weight });
+const SOFT = hit(false, 0, false, true);
 const NONE = hit(false, 0);
 
 /**
@@ -69,7 +70,7 @@ function hitTrain(period, reduce, dt = DT, seconds = 4, w = 1) {
 
 describe("hop", () => {
   it("exports the hop constants", () => {
-    expect([F_MIN, SCATTER, W_HAZE, HAZE_PEAK]).toEqual([0.5, 0.12, 0.7, 0.25]);
+    expect([F_MIN, SCATTER, W_HAZE, HAZE_PEAK]).toEqual([0.9, 0.12, 0.7, 0.25]);
   });
 
   it("launches grains for a 0.15 s flight at Hop 1 and full weight", () => {
@@ -87,7 +88,7 @@ describe("hop", () => {
           continue;
         }
         expect(h.impulse).toBeCloseTo(GRAVITY * 0.075 * hopParam * (0.4 + 0.6 * w), 9);
-        expect(h.fraction).toBeCloseTo(0.5 + 0.5 * w, 9);
+        expect(h.fraction).toBeCloseTo(0.9 + 0.1 * w, 9);
         expect(h.scatter).toBeCloseTo(0.12 * hopParam * w * w, 9);
       }
     }
@@ -96,16 +97,16 @@ describe("hop", () => {
   it("counts a new hop only on a fire; a grow re-sends a bigger hop under the same seq", () => {
     const hop = createHop();
     const a = hop.step(hit(true, 0.3), 1, DT, true);
-    expect([a.seq, a.fraction, a.launched]).toEqual([1, expect.closeTo(0.65, 9), 0]);
+    expect([a.seq, a.fraction, a.launched]).toEqual([1, expect.closeTo(0.93, 9), 0]);
     const b = hop.step(hit(false, 0.6, true), 1, DT, true);
     expect(b).toBe(a);
     expect(b.seq).toBe(1);
-    expect(b.fraction).toBeCloseTo(0.8, 9);
+    expect(b.fraction).toBeCloseTo(0.96, 9);
     expect(b.impulse).toBeCloseTo(hopVz0(1, 0.6), 9);
     // The grow names the share already launched, so only the grains between the two shares go up
     // (a short flight may have landed already: they must not hop twice).
-    expect(b.launched).toBeCloseTo(0.65, 9);
-    expect(hop.step(hit(false, 0.9, true), 1, DT, true).launched).toBeCloseTo(0.8, 9);
+    expect(b.launched).toBeCloseTo(0.93, 9);
+    expect(hop.step(hit(false, 0.9, true), 1, DT, true).launched).toBeCloseTo(0.96, 9);
     const c = hop.step(NONE, 1, DT, true);
     expect([c.impulse, c.scatter, c.fraction, c.seq, c.launched]).toEqual([0, 0, 0, 1, 0]);
     for (let i = 0; i < 20; i++) hop.step(NONE, 1, DT, true);
@@ -139,7 +140,7 @@ describe("hop", () => {
     const before = hop.step(NONE, 1, DT, true).haze;
     const h = hop.step(hit(true, 1), 1, DT, true);
     expect(h.seq).toBe(2);
-    expect(h.fraction).toBeCloseTo(0.5 + 0.5 * 0.7, 9);
+    expect(h.fraction).toBeCloseTo(0.9 + 0.1 * 0.7, 9);
     expect(h.impulse).toBeCloseTo(hopVz0(1, 0.7), 9);
     expect(h.scatter).toBeCloseTo(0.12 * 0.49, 9);
     expect(h.haze).toBeLessThanOrEqual(before);
@@ -156,7 +157,7 @@ describe("hop", () => {
     for (const dt of [1 / 60, 1 / 144]) {
       const { hops, sizes, haze } = hitTrain(0.1, true, dt);
       expect(hops.length).toBe(Math.ceil(Math.round(4 / dt) / Math.round(0.1 / dt)));
-      expect(sizes.every((f) => f >= 0.79 - 1e-9)).toBe(true);
+      expect(sizes.every((f) => f >= F_MIN + (1 - F_MIN) * W_HAZE - 1e-9)).toBe(true); // a refused hit hops at W_HAZE
       expect(maxPerSecond(flashStarts(haze, dt, 0.05))).toBeLessThanOrEqual(3);
     }
   });
@@ -293,7 +294,7 @@ describe("createPlateDrive", () => {
   });
 
   it("exports the pulse constants", () => {
-    expect([K_PULSE, PULSE_TAU, PULSE_BASE, DRIVE_PEAK, DRIVE_KNEE, DRIVE_CEIL]).toEqual([1.5, 0.12, 0.4, 3, 1.25, 2]);
+    expect([K_PULSE, PULSE_TAU, PULSE_BASE, PULSE_SOFT, DRIVE_PEAK, DRIVE_KNEE, DRIVE_CEIL]).toEqual([1.5, 0.12, 0.4, 0.25, 3, 1.25, 2]);
   });
 
   it("pulses the drive on a hit by 0.4 + 0.6·weight, decaying with τ 0.12 s, and to 0 on silence", () => {
@@ -318,6 +319,18 @@ describe("createPlateDrive", () => {
       s = d.step(audio({ silent: true }), 0, 1, true, 1, hit(true, 1), DT);
       expect(s.pulse).toBe(0);
     }
+  });
+
+  it("pulses the drive by PULSE_SOFT on a soft hit, without lowering a bigger pulse, and never hops on one", () => {
+    const steady = audio({ midAtt: 1, rms: 0.1 });
+    const d = createPlateDrive();
+    for (let i = 0; i < 240; i++) d.step(steady, 0, 1, true, 1, NONE, DT);
+    expect(d.step(steady, 0, 1, true, 1, SOFT, DT).pulse).toBeCloseTo(PULSE_SOFT, 9);
+    d.step(steady, 0, 1, true, 1, hit(true, 1), DT);
+    expect(d.step(steady, 0, 1, true, 1, SOFT, DT).pulse).toBeCloseTo(Math.exp(-DT / 0.12), 9);
+    expect(d.step(audio({ silent: true }), 0, 1, true, 1, SOFT, DT).pulse).toBe(0);
+    const hop = createHop();
+    for (let i = 0; i < 30; i++) expect(hop.step(SOFT, 1, DT, false).impulse).toBe(0);
   });
 
   it("never drops below the unpulsed drive: the base kneels above 1.25·reactivity toward 2, and a hit fills the rest up to 3·reactivity", () => {

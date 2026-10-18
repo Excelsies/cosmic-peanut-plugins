@@ -8,8 +8,8 @@
  * antinodes and drift into the node lines, so the figure draws itself and re-forms whenever the
  * note changes. Every beat hit (lib/hits.js: kicks, snares, claps, stomps) makes the sand hop, more
  * of it, higher and wider the heavier the bass under the hit, and shakes the plate harder for a
- * moment; hats add fizz, bass and stereo balance tilt the plate, silence freezes the sand where it
- * lies.
+ * moment; other onsets (vocal and synth attacks, 808 notes) only shake it a little, hats add fizz,
+ * bass and stereo balance tilt the plate, silence freezes the sand where it lies.
  *
  * Per frame: 1–4 feedback steps (1/120 s each), one additive POINTS pass into a half-resolution
  * density target, a second one that draws the airborne grains lifted by their height (lift.vert),
