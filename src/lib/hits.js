@@ -23,7 +23,11 @@
  *          R_BODY dB, a mid rise of R_MID dB on a not hat-like spectrum, the bass dominating and the
  *          low band at K_FLOOR dB or louder
  *   noise  a mid rise of FLUX_MIN dB on a not hat-like spectrum whose 1–5 kHz flatness (geometric
- *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more, with A, K or S
+ *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more, with A, K or S,
+ *          that clears the song's noise floor: NOISE_REL of the NOISE_Q quantile of the mid rises of
+ *          the noise frames of the last NOISE_WIN s (none under NOISE_MIN of them), so a song's quiet
+ *          clicks and breaths do not hop beside its loud snares; a host onset of C_MIN or more, or the
+ *          kick body rising (now or up to BODY_WIN s before) under a dominant bass, needs no floor
  * A kick only K sees (a K rise with the bass dominating and the body or click rising now, or of
  * K_HUGE dB) waits for the next analysis frame, at most K_WAIT s on, and hits there if the low level
  * held or rose: a kick keeps filling the FFT window, a busy bass line's peak falls back.
@@ -110,6 +114,14 @@ export const K_WAIT = 0.035;
 export const R_RISE = 6;
 export const R_BODY = 5;
 export const R_MID = 2;
+/**
+ * A noise burst that is no kick must rise NOISE_REL of the NOISE_Q quantile of the mid rises of the
+ * noise frames of the last NOISE_WIN s (at least NOISE_MIN of them; else no floor).
+ */
+export const NOISE_WIN = 6;
+export const NOISE_Q = 0.9;
+export const NOISE_REL = 0.25;
+export const NOISE_MIN = 8;
 
 /** Spectrum bin of `hz` (2048-point FFT). @param {number} hz @param {number} sampleRate */
 export function binOf(hz, sampleRate) {
@@ -269,6 +281,44 @@ function createRises() {
   return rises;
 }
 
+/**
+ * The mid rises of the latest noise frames (the newest HCAP): `level(t)` is the NOISE_Q quantile of
+ * those within NOISE_WIN s of t, or 0 under NOISE_MIN of them.
+ */
+function createNoiseFloor() {
+  const nt = new Float64Array(HCAP);
+  const nv = new Float32Array(HCAP);
+  const sorted = new Float32Array(HCAP);
+  let n = 0;
+  let head = 0;
+  return {
+    /** @param {number} t */
+    level(t) {
+      let m = 0;
+      for (let k = 0; k < n; k++) {
+        const j = (head + HCAP - 1 - k) % HCAP;
+        if (t - nt[j] > NOISE_WIN + 1e-9) break;
+        sorted[m++] = nv[j];
+      }
+      n = m; // older entries drop out by age
+      if (m < NOISE_MIN) return 0;
+      sorted.fill(Infinity, m);
+      sorted.sort();
+      return sorted[Math.floor(NOISE_Q * (m - 1))];
+    },
+    /** @param {number} t @param {number} x */
+    push(t, x) {
+      nt[head] = t;
+      nv[head] = x;
+      head = (head + 1) % HCAP;
+      if (n < HCAP) n++;
+    },
+    reset() {
+      n = 0;
+    },
+  };
+}
+
 /** Clamp to 0–1. @param {number} x */
 const unit = (x) => (x > 1 ? 1 : x > 0 ? x : 0);
 /** Weight of low level `db` with mean rise per bin `rise`. @param {number} db @param {number} rise */
@@ -279,6 +329,7 @@ export function createHits() {
   const mid = createBand();
   const body = createBand();
   const rises = createRises();
+  const noiseFloor = createNoiseFloor();
   const bins = new Int32Array(EDGES.length);
   const split = new Int32Array(MID_SPLIT + 1);
   let rate = NaN;
@@ -312,7 +363,10 @@ export function createHits() {
       const t = Number.isFinite(audio.hostTime) ? audio.hostTime : (lastT === -Infinity ? 0 : lastT) + sinceNew;
       sinceNew = 0;
       if (audio.silent === true) return out;
-      if (t < lastT) lastFire = lastSoft = fireT = bodyT = waitT = -Infinity; // host clock went back
+      if (t < lastT) {
+        lastFire = lastSoft = fireT = bodyT = waitT = -Infinity; // host clock went back
+        noiseFloor.reset();
+      }
       lastT = t;
       const sr = num(audio.sampleRate, 48000);
       if (sr !== rate) {
@@ -353,9 +407,14 @@ export function createHits() {
       const huge = low.flux >= K_HUGE;
       const r = rises.low >= R_RISE && body.flux >= R_BODY && mid.flux >= R_MID;
       const noise = mid.flux >= FLUX_MIN && !hatLike && flat >= FLAT_MIN;
-      const kickA = (a && ((share && (t - bodyT <= BODY_WIN + 1e-9 || click)) || huge)) || (r && !hatLike && share && xl >= K_FLOOR);
+      const bodyNear = t - bodyT <= BODY_WIN + 1e-9;
+      const kickA = (a && ((share && (bodyNear || click)) || huge)) || (r && !hatLike && share && xl >= K_FLOOR);
       const kickK = k && ((share && (body.flux >= BODY_DB || click)) || huge);
-      const now = kickA || (noise && (a || k || sm || r));
+      let burst = noise && (a || k || sm || r);
+      // A burst that is no kick clears the song's noise floor, unless a strong onset or the kick body comes with it.
+      if (burst && !kickA && !c && !(share && bodyNear)) burst = mid.flux >= NOISE_REL * noiseFloor.level(t);
+      if (noise) noiseFloor.push(t, mid.flux);
+      const now = kickA || burst;
       // A kick only the K path sees waits a frame: it hops if the low level then holds or keeps rising.
       const confirmed = t - waitT <= K_WAIT + 1e-9 && xl >= waitLevel;
       waitT = -Infinity;

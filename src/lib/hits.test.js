@@ -30,6 +30,10 @@ import {
   MID_HZ,
   MID_SPLIT,
   midSplit,
+  NOISE_MIN,
+  NOISE_Q,
+  NOISE_REL,
+  NOISE_WIN,
   R_BODY,
   R_MID,
   R_RISE,
@@ -206,6 +210,7 @@ describe("hits constants", () => {
     expect(BODY_HZ).toEqual([150, 400]);
     expect(K_HUGE).toBe(20);
     expect([BODY_WIN, K_WAIT, R_RISE, R_BODY, R_MID]).toEqual([0.04, 0.035, 6, 5, 2]);
+    expect([NOISE_WIN, NOISE_Q, NOISE_REL, NOISE_MIN]).toEqual([6, 0.9, 0.25, 8]);
   });
 
   it("measures the flatness of every FLAT_STEP-th bin: 1 for even noise, near 0 for a few harmonics", () => {
@@ -551,6 +556,46 @@ describe("createHits: only kicks and noise bursts hop", () => {
     const r = run(early);
     expect(r.fires).toEqual([]);
     expect(r.softs).toEqual([early[200].t]);
+  });
+
+  /**
+   * Four loud claps (a 30 dB mid rise, 12 noise frames), then 1 s on a 6 dB noise burst at frame
+   * `at`: a song's loud snares set the floor a quiet burst must clear. @param {Partial<Frame>} [burst] @param {number} [at]
+   */
+  const afterClaps = (burst = {}, at = 400) => {
+    const fr = floor(at + 60, burst.low !== undefined ? { low: burst.low } : {});
+    for (const k of [200, 224, 248, 272]) setFrames(fr, k, 3, { mid: -10, high: -32 });
+    return setFrames(fr, at, 3, { mid: -34, high: -40, ...burst });
+  };
+
+  it("takes a noise burst under NOISE_REL of the song's loud bursts (NOISE_Q of the last NOISE_WIN s) for a soft hit", () => {
+    const fr = afterClaps();
+    const r = run(fr);
+    expect(r.fires).toEqual([200, 224, 248, 272].map((k) => fr[k].t));
+    expect(r.softs).toEqual([fr[400].t]);
+    // The same burst with no loud bursts before it, or under too few of them (NOISE_MIN frames), hops.
+    const alone = setFrames(floor(460), 400, 3, { mid: -34, high: -40 });
+    expect(run(alone).fires).toEqual([alone[400].t]);
+    const few = setFrames(setFrames(floor(460), 200, 3, { mid: -10, high: -32 }), 400, 3, { mid: -34, high: -40 });
+    expect(run(few).fires).toEqual([few[200].t, few[400].t]);
+  });
+
+  it("forgets the loud bursts after NOISE_WIN s", () => {
+    const at = 272 + Math.ceil(NOISE_WIN / HOP) + 2;
+    const fr = afterClaps({}, at);
+    expect(run(fr).fires).toContain(fr[at].t);
+  });
+
+  it("hops on a quiet noise burst under a strong host onset, or with the kick body rising under a dominant bass", () => {
+    const onset = afterClaps({ onset: true, strength: C_MIN + 0.1, age: 0.004 });
+    expect(run(onset).fires).toContain(onset[400].t);
+    // A loud bass bed (the low band holds, so no bass rise): the body and the beater's noise come through.
+    const masked = afterClaps({ low: -20, body: -20 });
+    for (const f of masked) if (f.body === undefined) f.body = -32;
+    expect(run(masked).fires).toContain(masked[400].t);
+    const noBody = afterClaps({ low: -20, body: -32 });
+    for (const f of noBody) if (f.body === undefined) f.body = -32;
+    expect(run(noBody).fires).not.toContain(noBody[400].t);
   });
 
   it("hops on a kick into a ringing 808 that dips the band: its bins rise, with the body and a click", () => {
