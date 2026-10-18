@@ -33,7 +33,7 @@
  * low end fills it) the level and the rise are their highest so far, and a heavier result grows the
  * weight.
  *
- * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 70–87%
+ * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 67–86%
  * of the hops on the four drum-driven songs land on a reference kick or snare (was 45–70%) and
  * 75–98% of their reference kicks hop; synthetic hats, cowbells and rides alone take 0–4% of the
  * hops (12% on hip-hop at 144 fps) except on edm128 (16–21%: its pumping bass under open hats).
