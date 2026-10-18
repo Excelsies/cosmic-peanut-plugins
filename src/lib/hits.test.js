@@ -60,7 +60,7 @@ const WOBBLE = [0, 0.3, -0.2, 0.1, -0.3, 0.2];
  */
 
 /** FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR as tuned on the real songs and synthetic tracks. */
-const TUNED_GATE = [0.28, 2, -3, 2, 0.15, 1, 3, 3, -30];
+const TUNED_GATE = [0.28, 2, -4, 2, 0.15, 1, 3, 3, -30];
 
 /** Amplitude of a bin at `db`: 10·log10(a²) = dB. @param {number} db */
 const amp = (db) => Math.sqrt(10 ** (db / 10));
@@ -193,7 +193,7 @@ function setFrames(fr, k, n, set) {
 describe("hits constants", () => {
   it("exports the tuned constants", () => {
     expect([FLUX_SPAN, HIST, Z_FLOOR, Z, FLUX_MIN, A_STRONG, A_AGE, S_HAT_DB, C_MIN, REFRACTORY, REFIRE, WEIGHT_WIN, W_LO, W_HI]).toEqual([
-      0.035, 2, 0.5, 4, 3, 6, 0.03, -3, 0.6, 0.07, 0.12, 0.043, -28, -10,
+      0.035, 2, 0.5, 3, 3, 6, 0.03, -3, 0.6, 0.07, 0.12, 0.043, -28, -10,
     ]);
     expect([W_RISE_LO, W_RISE_HI, MID_SPLIT, BROAD_DB, BROAD_SHARE, REFIRE_W, A_FLOOR]).toEqual([1, 3.5, 8, 6, 0.5, 0.65, -40]);
     expect([FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR]).toEqual(TUNED_GATE);

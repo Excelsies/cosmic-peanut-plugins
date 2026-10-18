@@ -33,10 +33,11 @@
  * low end fills it) the level and the rise are their highest so far, and a heavier result grows the
  * weight.
  *
- * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 71–98%
- * of the reference kicks hop and 70–87% of hops land on a reference kick or snare (was 45–70%);
- * synthetic hats, cowbells and rides alone take 0–3% of the hops except on edm128 (16–22%, its
- * pumping bass). `step` allocates nothing.
+ * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 70–87%
+ * of the hops on the four drum-driven songs land on a reference kick or snare (was 45–70%) and
+ * 73–98% of their reference kicks hop; synthetic hats, cowbells and rides alone take 0–4% of the
+ * hops (12% on hip-hop at 144 fps) except on edm128 (16–21%: its pumping bass under open hats).
+ * `step` allocates nothing.
  */
 
 export const LOW_HZ = [23, 141];
@@ -49,7 +50,7 @@ export const FLUX_SPAN = 0.035;
 /** Seconds of flux history behind the z score, and the floor (dB) on its spread. */
 export const HIST = 2;
 export const Z_FLOOR = 0.5;
-export const Z = 4; // z score and rise (dB) a band must reach
+export const Z = 3; // z score and rise (dB) a band must reach
 export const FLUX_MIN = 3;
 /** A low rise of this many dB needs no host onset; smaller ones need one at most A_AGE s old. */
 export const A_STRONG = 6;
@@ -84,7 +85,7 @@ export const FLAT_STEP = 2;
  * A kick: low level minus the whole spectrum's (dB) at least SHARE_DB, and a body rise of BODY_DB
  * dB or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum at least FLAT_KICK flat.
  */
-export const SHARE_DB = -3;
+export const SHARE_DB = -4;
 export const BODY_DB = 2;
 export const FLAT_KICK = 0.15;
 export const CLICK_DB = 1;
