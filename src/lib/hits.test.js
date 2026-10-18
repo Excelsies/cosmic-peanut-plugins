@@ -25,6 +25,7 @@ import {
   K_FLUX,
   K_HUGE,
   K_RISE,
+  K_WAIT,
   LOW_HZ,
   MID_HZ,
   MID_SPLIT,
@@ -204,7 +205,7 @@ describe("hits constants", () => {
     expect([FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR]).toEqual(TUNED_GATE);
     expect(BODY_HZ).toEqual([150, 400]);
     expect(K_HUGE).toBe(20);
-    expect([BODY_WIN, R_RISE, R_BODY, R_MID]).toEqual([0.04, 6, 5, 2]);
+    expect([BODY_WIN, K_WAIT, R_RISE, R_BODY, R_MID]).toEqual([0.04, 0.035, 6, 5, 2]);
   });
 
   it("measures the flatness of every FLAT_STEP-th bin: 1 for even noise, near 0 for a few harmonics", () => {
@@ -514,7 +515,18 @@ describe("createHits: only kicks and noise bursts hop", () => {
     const fr = floor(400, { low: -14 }).map((f, k) => ({ ...f, tonal: true, low: -14 + [0, 2.5, -2, 1.5, -2.5, 2, 0.5, -1][k % 8], body: -45, lowTop: -45 }));
     for (let k = 300; k < 303; k++) Object.assign(fr[k], { low: -14 + K_FLUX + 1.5, body: -30, lowTop: -30 });
     const r = run(fr);
-    expect(r.fires).toEqual([fr[300].t]);
+    // A rise with no z score waits one analysis frame: it hops there if the low end holds or keeps building.
+    expect(r.fires).toEqual([fr[301].t]);
+    expect(r.softs).toContain(fr[300].t);
+  });
+
+  it("takes a z-less bass rise that falls back on the next frame (a busy bass line's peak) for a soft hit", () => {
+    const fr = floor(400, { low: -14 }).map((f, k) => ({ ...f, tonal: true, low: -14 + [0, 2.5, -2, 1.5, -2.5, 2, 0.5, -1][k % 8], body: -45, lowTop: -45 }));
+    Object.assign(fr[300], { low: -14 + K_FLUX + 1.5, body: -30, lowTop: -30 });
+    Object.assign(fr[301], { low: -14 + K_FLUX, body: -30, lowTop: -30 });
+    const r = run(fr);
+    expect(r.fires).toEqual([]);
+    expect(r.softs).toContain(fr[300].t);
   });
 
   it("takes a kick body that rose up to BODY_WIN s before the bass (the kick's pitch falls) for a kick, at 60 and 144 fps", () => {

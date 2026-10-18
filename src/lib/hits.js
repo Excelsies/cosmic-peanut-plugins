@@ -24,7 +24,9 @@
  *          low band at K_FLOOR dB or louder
  *   noise  a mid rise of FLUX_MIN dB on a not hat-like spectrum whose 1–5 kHz flatness (geometric
  *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more, with A, K or S
- * or a K rise with the bass dominating and the body or click rising, or of K_HUGE dB, is a kick too.
+ * A kick only K sees (a K rise with the bass dominating and the body or click rising now, or of
+ * K_HUGE dB) waits for the next analysis frame, at most K_WAIT s on, and hits there if the low level
+ * held or rose: a kick keeps filling the FFT window, a busy bass line's peak falls back.
  * Any other candidate, and a host onset of strength ≥ C_MIN on a non-hat spectrum, is a soft hit
  * (`soft`, at most one per REFRACTORY s): a vocal or synth attack, an 808 note, a sidechained bass
  * swelling back, a hat; Chladni gives it a drive pulse but no hop. Hits are at least REFRACTORY s
@@ -38,10 +40,10 @@
  * low end fills it) the level and the rise are their highest so far, and a heavier result grows the
  * weight.
  *
- * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 66–86%
- * of the hops on the four drum-driven songs land on a reference kick or snare and 82–98% of their
- * reference kicks hop; synthetic hats, cowbells and rides alone take 0–3% of the hops (12% on hip-hop
- * at 144 fps) except on edm128 (17–21%: its pumped reese bass swelling back between kicks).
+ * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 69–86%
+ * of the hops on the four drum-driven songs land on a reference kick or snare and 79–98% of their
+ * reference kicks hop; synthetic hats, cowbells and rides alone take 0–5% of the hops except on
+ * edm128 (17%: its pumped reese bass swelling back between kicks).
  * `step` allocates nothing.
  */
 
@@ -102,6 +104,8 @@ export const K_FLOOR = -30;
 export const K_HUGE = 20;
 /** Seconds the kick body may rise before an A rise and still count (the kick's pitch falls through it). */
 export const BODY_WIN = 0.04;
+/** Seconds within which the next analysis frame must confirm a K-only kick (its low level holding or rising). */
+export const K_WAIT = 0.035;
 /** A kick into a ringing 808: mean rise per low bin R_RISE dB, body rise R_BODY dB and mid rise R_MID dB. */
 export const R_RISE = 6;
 export const R_BODY = 5;
@@ -287,6 +291,8 @@ export function createHits() {
   let winLevel = -Infinity; // highest low level and rise since the fire (weight window)
   let winRise = 0;
   let bodyT = -Infinity; // last frame the kick body rose BODY_DB
+  let waitT = -Infinity; // a K-only kick waiting for the next frame, and its low level
+  let waitLevel = 0;
   const out = { fire: false, grow: false, soft: false, weight: 0 };
   return {
     out,
@@ -306,7 +312,7 @@ export function createHits() {
       const t = Number.isFinite(audio.hostTime) ? audio.hostTime : (lastT === -Infinity ? 0 : lastT) + sinceNew;
       sinceNew = 0;
       if (audio.silent === true) return out;
-      if (t < lastT) lastFire = lastSoft = fireT = bodyT = -Infinity; // host clock went back
+      if (t < lastT) lastFire = lastSoft = fireT = bodyT = waitT = -Infinity; // host clock went back
       lastT = t;
       const sr = num(audio.sampleRate, 48000);
       if (sr !== rate) {
@@ -349,11 +355,18 @@ export function createHits() {
       const noise = mid.flux >= FLUX_MIN && !hatLike && flat >= FLAT_MIN;
       const kickA = (a && ((share && (t - bodyT <= BODY_WIN + 1e-9 || click)) || huge)) || (r && !hatLike && share && xl >= K_FLOOR);
       const kickK = k && ((share && (body.flux >= BODY_DB || click)) || huge);
-      const now = kickA || kickK || (noise && (a || k || sm || r));
+      const now = kickA || (noise && (a || k || sm || r));
+      // A kick only the K path sees waits a frame: it hops if the low level then holds or keeps rising.
+      const confirmed = t - waitT <= K_WAIT + 1e-9 && xl >= waitLevel;
+      waitT = -Infinity;
+      if (kickK && !now) {
+        waitT = t;
+        waitLevel = xl;
+      }
       const since = t - lastFire;
       const again = since >= REFIRE - 1e-9 || (rises.low > winRise && out.weight < REFIRE_W) || rises.broad >= BROAD_SHARE;
       const cand = a || k || sm;
-      if (!now) {
+      if (!(now || confirmed)) {
         // A soft hit, at most one per REFRACTORY s (and none inside a hop's).
         out.soft = (cand || c) && since >= REFRACTORY - 1e-9 && t - lastSoft >= REFRACTORY - 1e-9;
         if (out.soft) lastSoft = t;
