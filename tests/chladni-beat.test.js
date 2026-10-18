@@ -4,13 +4,14 @@ import { readFileSync } from "node:fs";
 // @ts-expect-error -- a Node builtin, as above.
 import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
-import { binOf, createHits, HIGH_HZ, LOW_HZ, midSplit, MID_SPLIT } from "../src/lib/hits.js";
+import { binOf, BODY_HZ, createHits, FLAT_STEP, HIGH_HZ, LOW_HZ, MID_HZ, midSplit, MID_SPLIT } from "../src/lib/hits.js";
 import { createHop } from "../src/lib/sand.js";
 
-// Chladni's hops on real host analysis: excerpts and whole tracks (-full, gzipped) of synthetic
-// tracks (house, edm, pop-rock, beatbox, phonk) analysed by the host's own analyzer, at the analysis
-// rate (512/48000 s). Each fixture keeps the levels hits.js reads (dB of each low bin, of each mid
-// sub-band and of the high band) plus the host's onset fields, and the track's true hits inside the
+// Chladni's hops on real host analysis: excerpts and whole tracks (-full) of synthetic tracks
+// (house, edm, pop-rock, beatbox, phonk) analysed by the host's own analyzer, at the analysis rate
+// (512/48000 s), gzipped. Each fixture keeps the levels hits.js reads (dB of each low bin, of each
+// mid sub-band, of the high band, of the body band above the low band, of the whole spectrum, and of
+// each bin its flatness reads) plus the host's onset fields, and the track's true hits inside the
 // scored window; the first 2 s only warm up the flux history. The replay feeds them the way the runtime does at 60 and 144 fps: each display frame
 // gets the newest analysis frame (resent when none arrived) and carries any onset it skipped.
 
@@ -21,15 +22,56 @@ import { createHop } from "../src/lib/sand.js";
  */
 /** @param {string} name @returns {Fixture} */
 function fixture(name) {
-  const url = new URL(`./fixtures/chladni-${name}.json${name.endsWith("-full") ? ".gz" : ""}`, import.meta.url);
-  const raw = readFileSync(url);
-  return JSON.parse((name.endsWith("-full") ? gunzipSync(raw) : raw).toString("utf8"));
+  const url = new URL(`./fixtures/chladni-${name}.json.gz`, import.meta.url);
+  return JSON.parse(gunzipSync(readFileSync(url)).toString("utf8"));
 }
+const SR = 48000;
+const LOW0 = binOf(LOW_HZ[0], SR);
+const LOW1 = binOf(LOW_HZ[1], SR);
+const SPLIT = midSplit(SR);
+const HIGH0 = binOf(HIGH_HZ[0], SR);
+/** The body band's bins above the low band's top bin (which it shares). */
+const BODY0 = LOW1 + 1;
+/** The bins hits.js's flatness reads. */
+const FLAT_BINS = /** @type {number[]} */ ([]);
+for (let b = binOf(MID_HZ[0], SR); b <= binOf(MID_HZ[1], SR); b += FLAT_STEP) FLAT_BINS.push(b);
+/** A bin outside every band, for the rest of the whole spectrum's level. */
+const REST = 800;
 const COLUMNS = ["t", "frameIndex", "onset", "onsetStrength", "onsetAge", "low1", "low2", "low3", "low4", "low5", "low6"];
 for (let k = 1; k <= MID_SPLIT; k++) COLUMNS.push(`mid${k}`);
-COLUMNS.push("high");
+COLUMNS.push("high", "body", "full");
+for (let k = 1; k <= FLAT_BINS.length; k++) COLUMNS.push(`flat${k}`);
 
-const amp = (/** @type {number} */ db) => Math.sqrt(10 ** (db / 10));
+const pow = (/** @type {number} */ db) => 10 ** (db / 10);
+const amp = (/** @type {number} */ db) => Math.sqrt(pow(db));
+
+/**
+ * Rebuild a spectrum from a fixture row: each low bin, the flatness bins, each mid sub-band's rest
+ * in one bin that hits.js's flatness skips, the high band and the body band (above the low band) in
+ * one bin each, and the whole spectrum's rest in a bin outside every band.
+ * @param {Float32Array} s @param {number[]} row
+ */
+function spectrumOf(s, row) {
+  s.fill(0);
+  let sum = 0;
+  for (let i = 0; i < 6; i++) {
+    s[LOW0 + i] = amp(row[5 + i]);
+    sum += pow(row[5 + i]);
+  }
+  const flat0 = 11 + MID_SPLIT + 3;
+  FLAT_BINS.forEach((b, j) => (s[b] = amp(row[flat0 + j])));
+  for (let k = 0; k < MID_SPLIT; k++) {
+    let inBand = 0;
+    for (const b of FLAT_BINS) if (b >= SPLIT[k] && b < SPLIT[k + 1]) inBand += s[b] ** 2;
+    const rest = Math.max(0, pow(row[11 + k]) - inBand);
+    s[FLAT_BINS.includes(SPLIT[k]) ? SPLIT[k] + 1 : SPLIT[k]] += Math.sqrt(rest);
+    sum += pow(row[11 + k]);
+  }
+  s[HIGH0] = amp(row[11 + MID_SPLIT]);
+  s[BODY0] = amp(row[12 + MID_SPLIT]);
+  sum += pow(row[11 + MID_SPLIT]) + pow(row[12 + MID_SPLIT]);
+  s[REST] = Math.sqrt(Math.max(0, pow(row[13 + MID_SPLIT]) - sum));
+}
 
 /**
  * Replay a fixture through createHits → createHop at Hop 1.
@@ -41,10 +83,9 @@ function replay(fx, fps, reduceFlashing) {
   const hits = createHits();
   const hop = createHop();
   const sr = fx.sampleRate;
-  const low0 = binOf(LOW_HZ[0], sr);
-  expect(binOf(LOW_HZ[1], sr) - low0 + 1).toBe(6);
-  const split = midSplit(sr);
-  const high0 = binOf(HIGH_HZ[0], sr);
+  expect(sr).toBe(SR);
+  expect(LOW1 - LOW0 + 1).toBe(6);
+  expect([binOf(BODY_HZ[0], SR), binOf(BODY_HZ[1], SR)]).toEqual([LOW1, 17]);
   const audio = { spectrum: new Float32Array(1024), sampleRate: sr, frameIndex: -1, hostTime: 0, silent: false, onset: false, onsetStrength: 0, onsetAge: 10 };
   /** @type {{ t: number, w: number }[]} */ const hops = [];
   const F = fx.frames;
@@ -64,10 +105,7 @@ function replay(fx, fps, reduceFlashing) {
     }
     const row = F[cur];
     const [t, frameIndex, , strength, age] = row;
-    audio.spectrum.fill(0); // each column's level in one bin: the low bins, a bin per mid sub-band, a high bin
-    for (let i = 0; i < 6; i++) audio.spectrum[low0 + i] = amp(row[5 + i]);
-    for (let k = 0; k < MID_SPLIT; k++) audio.spectrum[split[k]] = amp(row[11 + k]);
-    audio.spectrum[high0] = amp(row[11 + MID_SPLIT]);
+    spectrumOf(audio.spectrum, row);
     audio.frameIndex = frameIndex;
     audio.hostTime = t;
     audio.onsetAge = age;
@@ -94,15 +132,16 @@ const RATES = [60, 144];
 
 describe("Chladni hops on the house124 trace", () => {
   const fx = fixture("house124");
-  /** Onset frames that are not kicks: a stray hat-plus-bass onset, then two off-beat open hats. */
+  /** Onset frames that are not kicks: a stray hat-plus-bass onset, then two off-beat open hats. A kick
+   * whose body or click shows a frame late hops up to 40 ms after it. */
   const NOT_KICKS = [7.8933, 8.2453, 8.736];
 
   for (const fps of RATES) {
     for (const rf of [true, false]) {
-      it(`hops on each of the 7 kicks, 0–30 ms after it, and never on the off-beat onsets (${fps} fps, reduce flashing ${rf ? "on" : "off"})`, () => {
+      it(`hops on each of the 7 kicks, 0–40 ms after it, and never on the off-beat onsets (${fps} fps, reduce flashing ${rf ? "on" : "off"})`, () => {
         const hops = replay(fx, fps, rf);
         expect(fx.events.kick).toHaveLength(7);
-        fx.events.kick.forEach((k) => expect(hopsNear(hops, k, 0, 0.03)).toHaveLength(1));
+        fx.events.kick.forEach((k) => expect(hopsNear(hops, k, 0, 0.04)).toHaveLength(1));
         for (const t of NOT_KICKS) expect(hopsNear(hops, t, -0.03, 0.03)).toHaveLength(0);
       });
     }
@@ -192,9 +231,9 @@ function spearman(a, b) {
 }
 
 for (const [name, hatShare, kickShare] of /** @type {[string, number, number][]} */ ([
-  ["house124-full", 0.08, 0.95],
-  ["edm128-full", 0.3, 0.85],
-  ["phonk130-full", 0.15, 0.85],
+  ["house124-full", 0.02, 0.95],
+  ["edm128-full", 0.25, 0.75],
+  ["phonk130-full", 0.05, 0.8],
 ])) {
   describe(`Chladni hops over the whole ${name.replace("-full", "")} track`, () => {
     const fx = fixture(name);
@@ -221,14 +260,11 @@ for (const [name, hatShare, kickShare] of /** @type {[string, number, number][]}
 describe("Chladni hop size over the whole phonk130 track", () => {
   const fx = fixture("phonk130-full");
   for (const fps of RATES) {
-    it(`weighs kicks over hats and cowbells, and follows the reference bass weight (${fps} fps)`, () => {
+    it(`hardly hops on hats and cowbells over the ringing 808, and follows the reference bass weight (${fps} fps)`, () => {
       const hops = replay(fx, fps, true);
-      const med = (/** @type {number[]} */ x) => [...x].sort((a, b) => a - b)[Math.floor(x.length / 2)];
-      const onKick = hops.filter((h) => near(h.t, fx.events.kick, -0.06, 0.06)).map((h) => h.w);
       // hats and cowbells with no kick, snare, clap or 808 note within 50 ms: over the ringing 808 alone
-      const off = hops.filter((h) => near(h.t, fx.events.offBeatNoBass) && !near(h.t, [...fx.events.kick, ...fx.events.snare])).map((h) => h.w);
-      expect(off.length).toBeGreaterThan(15);
-      expect(med(onKick)).toBeGreaterThan(med(off) + 0.4);
+      const off = hops.filter((h) => near(h.t, fx.events.offBeatNoBass) && !near(h.t, [...fx.events.kick, ...fx.events.snare]));
+      expect(off.length).toBeLessThanOrEqual(0.05 * hops.length);
       const bass = /** @type {[number, number][]} */ (fx.bassHits);
       /** @type {number[]} */ const w = [];
       /** @type {number[]} */ const ref = [];

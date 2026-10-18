@@ -1,40 +1,55 @@
 // @ts-check
 /**
  * Beat hits and how heavy they are, for Chladni's hops and plate pulse. The host's `onset` fires
- * on any transient, so this watches three bands of the spectrum: low 23–141 Hz (kick, 808), mid
- * 1–5 kHz (snare, clap, stomp, beatbox "pf") and high 6–15 kHz (only to recognise hats).
+ * on any transient, so this watches bands of the spectrum: low 23–141 Hz (kick, 808), body
+ * 150–400 Hz (the kick's body), mid 1–5 kHz (snare, clap, stomp, beatbox "pf") and high 6–15 kHz
+ * (only to recognise hats).
  *
  * Per new analysis frame (`frameIndex` changed: at 144 fps the host resends frames; time is its
  * `hostTime`, or the summed `dt` for sources that send none) a band's flux is its dB level's rise
  * over the lowest level of the last FLUX_SPAN seconds, judged as a robust z score against its own
- * last HIST seconds: (flux − median) / (1.4826·MAD + Z_FLOOR). A hit, at least REFRACTORY s apart:
+ * last HIST seconds: (flux − median) / (1.4826·MAD + Z_FLOOR). A candidate is
  *   A  a low rise (z ≥ Z, ≥ FLUX_MIN dB) of A_STRONG dB or more, or with a host onset ≤ A_AGE s old,
  *      of a low band at A_FLOOR dB or louder (a rise out of near silence is no bass hit)
+ *   K  a low rise of K_FLUX dB with a mean rise per low bin of K_RISE dB, of a low band at K_FLOOR
+ *      dB or louder, whatever its z score (a kick over a busy, heavy bass line)
  *   S  a mid rise (z ≥ Z, ≥ FLUX_MIN dB) on a spectrum that is not hat-like (mid − high < S_HAT_DB)
- *   C  a host onset of strength ≥ C_MIN on a spectrum that is not hat-like
- * Within REFIRE s of the last hit a new one also needs a bigger low rise per bin than that hit's
- * (after a hit lighter than REFIRE_W only), or a broad mid rise (≥ BROAD_DB dB in at least
+ * and it hits (fires) only as a kick or a noise burst:
+ *   kick   A or K with the bass dominating (low − whole spectrum ≥ SHARE_DB) and the body rising
+ *          BODY_DB, or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum whose
+ *          1–5 kHz flatness is FLAT_KICK or more
+ *   noise  a mid rise of FLUX_MIN dB on a not hat-like spectrum whose 1–5 kHz flatness (geometric
+ *          over arithmetic mean power of every FLAT_STEP-th bin) is FLAT_MIN or more
+ * Any other candidate, and a host onset of strength ≥ C_MIN on a non-hat spectrum, is a soft hit
+ * (`soft`, at most one per REFRACTORY s): a vocal or synth attack, an 808 note, a sidechained bass
+ * swelling back, a hat; Chladni gives it a drive pulse but no hop. Hits are at least REFRACTORY s
+ * apart; within REFIRE s of the last hit a new one also needs a bigger low rise per bin than that
+ * hit's (after a hit lighter than REFIRE_W only), or a broad mid rise (≥ BROAD_DB dB in at least
  * BROAD_SHARE of the MID_SPLIT mid sub-bands): a snare or clap, not a cowbell or the kick's own tail.
- * Its weight is how much bass arrived with it: the low level mapped from W_LO..W_HI dB to 0–1, times
- * the low band's mean rise per bin (each bin's dB over its lowest of the last FLUX_SPAN s) mapped
- * from W_RISE_LO..W_RISE_HI dB to 0–1. Per bin, a kick on a ringing 808 counts even when a limiter
- * holds the band's level; a hat or cowbell over the same 808 weighs about nothing. For WEIGHT_WIN s
- * after the fire (one FFT window, while the kick's low end fills it) the level and the rise are
- * their highest so far, and a heavier result grows the weight.
+ * A hit's weight is how much bass arrived with it: the low level mapped from W_LO..W_HI dB to 0–1,
+ * times the low band's mean rise per bin (each bin's dB over its lowest of the last FLUX_SPAN s)
+ * mapped from W_RISE_LO..W_RISE_HI dB to 0–1. Per bin, a kick on a ringing 808 counts even when a
+ * limiter holds the band's level. For WEIGHT_WIN s after the fire (one FFT window, while the kick's
+ * low end fills it) the level and the rise are their highest so far, and a heavier result grows the
+ * weight.
  *
- * On five real songs and nine synthetic tracks (one hop per hit, 60/144 fps): 69–100% of the
- * reference beat hits and 85–100% of the kicks fire. `step` allocates nothing.
+ * Replayed on five real songs and nine synthetic tracks (60/144 fps and ±50% frame jitter), 71–98%
+ * of the reference kicks hop and 70–87% of hops land on a reference kick or snare (was 45–70%);
+ * synthetic hats, cowbells and rides alone take 0–3% of the hops except on edm128 (16–22%, its
+ * pumping bass). `step` allocates nothing.
  */
 
 export const LOW_HZ = [23, 141];
 export const MID_HZ = [1000, 5000];
 export const HIGH_HZ = [6000, 15000];
+/** The kick's body (its lowest bin is the low band's highest at 48 kHz). */
+export const BODY_HZ = [150, 400];
 /** Seconds of earlier frames a rise is measured against (3 analysis frames). */
 export const FLUX_SPAN = 0.035;
 /** Seconds of flux history behind the z score, and the floor (dB) on its spread. */
 export const HIST = 2;
 export const Z_FLOOR = 0.5;
-export const Z = 3; // z score and rise (dB) a band must reach
+export const Z = 4; // z score and rise (dB) a band must reach
 export const FLUX_MIN = 3;
 /** A low rise of this many dB needs no host onset; smaller ones need one at most A_AGE s old. */
 export const A_STRONG = 6;
@@ -62,6 +77,21 @@ export const W_RISE_HI = 3.5;
 export const MID_SPLIT = 8;
 export const BROAD_DB = 6;
 export const BROAD_SHARE = 0.5;
+/** A noise burst: flatness (geometric over arithmetic mean power) of every FLAT_STEP-th mid bin. */
+export const FLAT_MIN = 0.28;
+export const FLAT_STEP = 2;
+/**
+ * A kick: low level minus the whole spectrum's (dB) at least SHARE_DB, and a body rise of BODY_DB
+ * dB or the beater's click: a mid rise of CLICK_DB on a not hat-like spectrum at least FLAT_KICK flat.
+ */
+export const SHARE_DB = -3;
+export const BODY_DB = 2;
+export const FLAT_KICK = 0.15;
+export const CLICK_DB = 1;
+/** A bass rise with no z score: band rise K_FLUX dB, mean rise per low bin K_RISE dB, low level K_FLOOR dB or more. */
+export const K_FLUX = 3;
+export const K_RISE = 3;
+export const K_FLOOR = -30;
 
 /** Spectrum bin of `hz` (2048-point FFT). @param {number} hz @param {number} sampleRate */
 export function binOf(hz, sampleRate) {
@@ -79,7 +109,7 @@ export function midSplit(sampleRate, out = new Int32Array(MID_SPLIT + 1)) {
   return out;
 }
 
-const EDGES = [...LOW_HZ, ...MID_HZ, ...HIGH_HZ]; // Hz
+const EDGES = [...LOW_HZ, ...MID_HZ, ...HIGH_HZ, ...BODY_HZ]; // Hz
 const RECENT = 16;
 const HCAP = 256;
 const MIN_HISTORY = 8;
@@ -96,6 +126,24 @@ function level(s, a, b) {
   for (let i = a; i <= b && i < s.length; i++) e += s[i] * s[i];
   const db = 10 * Math.log10(e + 1e-9);
   return Number.isFinite(db) ? db : -120;
+}
+
+/**
+ * Spectral flatness of the power in every FLAT_STEP-th bin of a..b: 1 for even noise, near 0 for a
+ * few tones. @param {Float32Array} s @param {number} a @param {number} b
+ */
+export function flatness(s, a, b) {
+  let logSum = 0;
+  let sum = 0;
+  let n = 0;
+  for (let i = a; i <= b && i < s.length; i += FLAT_STEP) {
+    const v = s[i];
+    const p = (Number.isFinite(v) ? v * v : 0) + 1e-12;
+    logSum += Math.log(p);
+    sum += p;
+    n++;
+  }
+  return n > 0 ? Math.exp(logSum / n) / (sum / n) : 0;
 }
 
 /** Median of the first n entries, after padding the rest with +Infinity and sorting. @param {Float32Array} a @param {number} n */
@@ -120,6 +168,8 @@ function createBand() {
   const band = {
     flux: 0,
     z: 0,
+    /** Whether the history is long enough to judge a rise (MIN_HISTORY frames). */
+    ready: false,
     /** @param {number} t @param {number} x */
     step(t, x) {
       if (rn > 0 && t < rt[(rh + RECENT - 1) % RECENT]) rn = hn = 0; // host clock went back
@@ -142,7 +192,8 @@ function createBand() {
       }
       hn = m;
       band.z = 0;
-      if (m >= MIN_HISTORY) {
+      band.ready = m >= MIN_HISTORY;
+      if (band.ready) {
         const med = median(sorted, m);
         for (let k = 0; k < m; k++) dev[k] = Math.abs(sorted[k] - med);
         band.z = (band.flux - med) / (1.4826 * median(dev, m) + Z_FLOOR);
@@ -208,18 +259,20 @@ const weightOf = (db, rise) => unit((db - W_LO) / (W_HI - W_LO)) * unit((rise - 
 export function createHits() {
   const low = createBand();
   const mid = createBand();
+  const body = createBand();
   const rises = createRises();
-  const bins = new Int32Array(6);
+  const bins = new Int32Array(EDGES.length);
   const split = new Int32Array(MID_SPLIT + 1);
   let rate = NaN;
   let lastFrame = NaN;
   let lastT = -Infinity;
   let sinceNew = 0;
   let lastFire = -Infinity;
+  let lastSoft = -Infinity;
   let fireT = -Infinity;
   let winLevel = -Infinity; // highest low level and rise since the fire (weight window)
   let winRise = 0;
-  const out = { fire: false, grow: false, weight: 0 };
+  const out = { fire: false, grow: false, soft: false, weight: 0 };
   return {
     out,
     /**
@@ -230,6 +283,7 @@ export function createHits() {
     step(audio, dt = 0) {
       out.fire = false;
       out.grow = false;
+      out.soft = false;
       sinceNew += dt > 0 ? dt : 0; // NaN too
       if (audio.frameIndex === lastFrame) return out;
       lastFrame = audio.frameIndex;
@@ -237,20 +291,22 @@ export function createHits() {
       const t = Number.isFinite(audio.hostTime) ? audio.hostTime : (lastT === -Infinity ? 0 : lastT) + sinceNew;
       sinceNew = 0;
       if (audio.silent === true) return out;
-      if (t < lastT) lastFire = fireT = -Infinity; // host clock went back
+      if (t < lastT) lastFire = lastSoft = fireT = -Infinity; // host clock went back
       lastT = t;
       const sr = num(audio.sampleRate, 48000);
       if (sr !== rate) {
         rate = sr;
-        for (let i = 0; i < 6; i++) bins[i] = binOf(EDGES[i], sr);
+        for (let i = 0; i < EDGES.length; i++) bins[i] = binOf(EDGES[i], sr);
         midSplit(sr, split);
       }
       const s = audio.spectrum;
       const xl = level(s, bins[0], bins[1]);
       const xm = level(s, bins[2], bins[3]);
       const xh = level(s, bins[4], bins[5]);
+      const xf = level(s, 1, s.length - 1);
       low.step(t, xl);
       mid.step(t, xm);
+      body.step(t, level(s, bins[6], bins[7]));
       rises.step(t, s, bins[0], Math.min(LOW_CAP, Math.max(0, Math.min(bins[1], s.length - 1) - bins[0] + 1)), split);
 
       if (t - fireT <= WEIGHT_WIN + 1e-9) {
@@ -265,11 +321,21 @@ export function createHits() {
       const age = num(audio.onsetAge, 10);
       const hatLike = xm - xh < S_HAT_DB;
       const a = xl >= A_FLOOR && low.z >= Z && low.flux >= FLUX_MIN && (low.flux >= A_STRONG || age <= A_AGE);
+      const k = low.ready && xl >= K_FLOOR && low.flux >= K_FLUX && rises.low >= K_RISE;
       const sm = mid.z >= Z && mid.flux >= FLUX_MIN && !hatLike;
       const c = audio.onset === true && unit(num(audio.onsetStrength, 0)) >= C_MIN && !hatLike;
+      // Only a kick or a noise burst hops; any other candidate is a soft hit (drive pulse, no hop).
+      const flat = flatness(s, bins[2], bins[3]);
+      const kick = (a || k) && xl - xf >= SHARE_DB && (body.flux >= BODY_DB || (mid.flux >= CLICK_DB && flat >= FLAT_KICK && !hatLike));
+      const noise = mid.flux >= FLUX_MIN && !hatLike && flat >= FLAT_MIN;
       const since = t - lastFire;
       const again = since >= REFIRE - 1e-9 || (rises.low > winRise && out.weight < REFIRE_W) || rises.broad >= BROAD_SHARE;
-      if ((a || sm || c) && since >= REFRACTORY - 1e-9 && again) {
+      const cand = a || k || sm;
+      if (!(cand && (kick || noise))) {
+        // A soft hit, at most one per REFRACTORY s (and none inside a hop's).
+        out.soft = (cand || c) && since >= REFRACTORY - 1e-9 && t - lastSoft >= REFRACTORY - 1e-9;
+        if (out.soft) lastSoft = t;
+      } else if (since >= REFRACTORY - 1e-9 && again) {
         lastFire = t;
         fireT = t;
         winLevel = xl;

@@ -5,14 +5,24 @@ import {
   A_FLOOR,
   A_STRONG,
   binOf,
+  BODY_DB,
+  BODY_HZ,
   BROAD_DB,
   BROAD_SHARE,
   C_MIN,
+  CLICK_DB,
   createHits,
+  FLAT_KICK,
+  FLAT_MIN,
+  FLAT_STEP,
+  flatness,
   FLUX_MIN,
   FLUX_SPAN,
   HIGH_HZ,
   HIST,
+  K_FLOOR,
+  K_FLUX,
+  K_RISE,
   LOW_HZ,
   MID_HZ,
   MID_SPLIT,
@@ -21,6 +31,7 @@ import {
   REFIRE_W,
   REFRACTORY,
   S_HAT_DB,
+  SHARE_DB,
   W_HI,
   W_LO,
   W_RISE_HI,
@@ -39,15 +50,26 @@ const WOBBLE = [0, 0.3, -0.2, 0.1, -0.3, 0.2];
 /**
  * @typedef {{ t: number, i: number, low: number, mid: number, high: number,
  *   onset?: boolean, strength?: number, age?: number, silent?: boolean,
- *   lowBins?: number[], narrow?: boolean }} Frame
+ *   lowBins?: number[], narrow?: boolean, tonal?: boolean, body?: number, lowTop?: number }} Frame
  * lowBins: per-bin levels (dB) of the low band instead of `low` spread evenly over its bins;
- * narrow: `mid` in one mid sub-band (a cowbell) instead of spread evenly over all of them (a snare).
+ * narrow: `mid` in one bin (a cowbell); tonal: `mid` in TONAL_BINS harmonics (a synth or vocal
+ * note); else `mid` spread evenly over every mid bin (noise: a snare or clap);
+ * body: level (dB) of the kick-body band, spread over its bins above the low band; by default `low` − 6 (a kick's body
+ * follows its low end); lowTop: level (dB) of the low band's top bin, which the body band shares
+ * (a swell or bass line that leaves the body band alone).
  */
+
+/** FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR as tuned on the real songs and synthetic tracks. */
+const TUNED_GATE = [0.28, 2, -3, 2, 0.15, 1, 3, 3, -30];
 
 /** Amplitude of a bin at `db`: 10·log10(a²) = dB. @param {number} db */
 const amp = (db) => Math.sqrt(10 ** (db / 10));
 const LOW_BINS = [binOf(LOW_HZ[0], SR), binOf(LOW_HZ[1], SR)];
-const SPLIT = midSplit(SR);
+const MID_BINS = [binOf(MID_HZ[0], SR), binOf(MID_HZ[1], SR)];
+/** The body band's bins above the low band's (they share one bin at 48 kHz). */
+const BODY_BINS = [Math.max(binOf(BODY_HZ[0], SR), LOW_BINS[1] + 1), binOf(BODY_HZ[1], SR)];
+/** Harmonics of a 1 kHz note: bins of 1, 1.5, 2, 3 and 4 kHz. */
+const TONAL_BINS = [1000, 1500, 2000, 3000, 4000].map((hz) => binOf(hz, SR));
 
 /** An AudioFrame-shaped object for createHits. */
 function makeAudio() {
@@ -72,8 +94,15 @@ function load(a, f) {
   a.spectrum.fill(0);
   const nLow = LOW_BINS[1] - LOW_BINS[0] + 1;
   for (let i = 0; i < nLow; i++) a.spectrum[LOW_BINS[0] + i] = amp(f.lowBins ? f.lowBins[i] : f.low - 10 * Math.log10(nLow));
-  if (f.narrow) a.spectrum[SPLIT[0]] = amp(f.mid);
-  else for (let k = 0; k < MID_SPLIT; k++) a.spectrum[SPLIT[k]] = amp(f.mid - 10 * Math.log10(MID_SPLIT));
+  if (f.lowTop !== undefined) a.spectrum[LOW_BINS[1]] = amp(f.lowTop);
+  if (f.narrow) a.spectrum[MID_BINS[0]] = amp(f.mid);
+  else if (f.tonal) for (const b of TONAL_BINS) a.spectrum[b] = amp(f.mid - 10 * Math.log10(TONAL_BINS.length));
+  else {
+    const nMid = MID_BINS[1] - MID_BINS[0] + 1;
+    for (let i = MID_BINS[0]; i <= MID_BINS[1]; i++) a.spectrum[i] = amp(f.mid - 10 * Math.log10(nMid));
+  }
+  const nBody = BODY_BINS[1] - BODY_BINS[0] + 1;
+  for (let i = BODY_BINS[0]; i <= BODY_BINS[1]; i++) a.spectrum[i] = amp((f.body ?? f.low - 6) - 10 * Math.log10(nBody));
   a.spectrum[binOf(HIGH_HZ[0], a.sampleRate)] = amp(f.high);
   a.frameIndex = f.i;
   a.hostTime = f.t;
@@ -104,14 +133,16 @@ function run(frames, hits = createHits()) {
   /** @type {number[]} */ const fires = [];
   /** @type {number[]} */ const grows = [];
   /** @type {number[]} */ const weights = [];
+  /** @type {number[]} */ const softs = [];
   for (const f of frames) {
     load(a, f);
     const o = hits.step(a);
+    if (o.soft) softs.push(f.t);
     if (o.fire) fires.push(f.t);
     if (o.grow) grows.push(f.t);
     if (o.fire || o.grow) weights.push(o.weight);
   }
-  return { fires, grows, weights, out: hits.out };
+  return { fires, grows, weights, softs, out: hits.out };
 }
 
 /**
@@ -162,9 +193,22 @@ function setFrames(fr, k, n, set) {
 describe("hits constants", () => {
   it("exports the tuned constants", () => {
     expect([FLUX_SPAN, HIST, Z_FLOOR, Z, FLUX_MIN, A_STRONG, A_AGE, S_HAT_DB, C_MIN, REFRACTORY, REFIRE, WEIGHT_WIN, W_LO, W_HI]).toEqual([
-      0.035, 2, 0.5, 3, 3, 6, 0.03, -3, 0.6, 0.07, 0.12, 0.043, -28, -10,
+      0.035, 2, 0.5, 4, 3, 6, 0.03, -3, 0.6, 0.07, 0.12, 0.043, -28, -10,
     ]);
     expect([W_RISE_LO, W_RISE_HI, MID_SPLIT, BROAD_DB, BROAD_SHARE, REFIRE_W, A_FLOOR]).toEqual([1, 3.5, 8, 6, 0.5, 0.65, -40]);
+    expect([FLAT_MIN, FLAT_STEP, SHARE_DB, BODY_DB, FLAT_KICK, CLICK_DB, K_FLUX, K_RISE, K_FLOOR]).toEqual(TUNED_GATE);
+    expect(BODY_HZ).toEqual([150, 400]);
+  });
+
+  it("measures the flatness of every FLAT_STEP-th bin: 1 for even noise, near 0 for a few harmonics", () => {
+    const s = new Float32Array(1024);
+    for (let i = 43; i <= 213; i++) s[i] = 0.01;
+    expect(flatness(s, 43, 213)).toBeCloseTo(1, 6);
+    s.fill(0);
+    for (const b of TONAL_BINS) s[b] = 0.1;
+    expect(flatness(s, 43, 213)).toBeLessThan(0.01);
+    s[44] = NaN;
+    expect(Number.isFinite(flatness(s, 43, 213))).toBe(true);
   });
 
   it("derives the band bins from the sample rate", () => {
@@ -273,7 +317,7 @@ describe("createHits", () => {
     expect(twice.weights).toEqual(once.weights);
     // Resent frames must not enter the flux history either: as extra zero-flux entries they would
     // shrink its spread until the ordinary rises of a busy low band pass the z score.
-    const busy = floor(400, { mid: -30, high: -30 }).map((f, k) => ({ ...f, low: -30 + [0, 4.5, -1, 3.5, -2, 5, 0.5, -1.5][k % 8] }));
+    const busy = floor(400, { mid: -30, high: -30 }).map((f, k) => ({ ...f, tonal: true, body: -45, lowTop: -45, low: -30 + [0, 4.5, -1, 3.5, -2, 5, 0.5, -1.5][k % 8] }));
     expect(run(busy).fires).toEqual([]);
     expect(run(busy.flatMap((f) => [f, f, f])).fires).toEqual([]);
   });
@@ -306,10 +350,10 @@ describe("createHits", () => {
 
   it("needs a host onset within 30 ms for a low rise under 6 dB", () => {
     for (const [rise, age, fires] of [
-      [4, 0.02, 1],
-      [4, 0.03, 1],
-      [4, 0.05, 0],
-      [4, 10, 0],
+      [5, 0.02, 1],
+      [5, 0.03, 1],
+      [5, 0.05, 0],
+      [5, 10, 0],
       [7, 10, 1],
     ]) {
       const fr = floor(260);
@@ -327,7 +371,7 @@ describe("createHits", () => {
     expect(run(hat).fires).toEqual([]);
   });
 
-  it("fires on a host onset of strength 0.6 or more on a non-hat spectrum", () => {
+  it("takes a host onset of strength 0.6 or more on a non-hat spectrum for a soft hit", () => {
     for (const [s, n] of [
       [0.6, 1],
       [1.4, 1],
@@ -335,7 +379,9 @@ describe("createHits", () => {
     ]) {
       const fr = floor(260, { mid: -40, high: -45 });
       setFrames(fr, 200, 1, { onset: true, strength: s, age: 0.004 });
-      expect(run(fr).fires).toHaveLength(n);
+      const r = run(fr);
+      expect(r.fires).toEqual([]);
+      expect(r.softs).toHaveLength(n);
     }
   });
 
@@ -404,6 +450,54 @@ describe("createHits", () => {
     a.frameIndex = 1;
     a.hostTime += HOP;
     expect(hits.step(a)).toBe(o);
-    expect(Object.keys(o).sort()).toEqual(["fire", "grow", "weight"]);
+    expect(Object.keys(o).sort()).toEqual(["fire", "grow", "soft", "weight"]);
   });
 });
+
+describe("createHits: only kicks and noise bursts hop", () => {
+  it("hops on a mid rise of noise (a snare or clap), and takes the same rise of a tonal note for a soft hit", () => {
+    const snare = floor(260);
+    setFrames(snare, 200, 3, { mid: -28, high: -32 });
+    expect(run(snare).fires).toEqual([snare[200].t]);
+    const note = floor(260).map((f) => ({ ...f, tonal: true }));
+    setFrames(note, 200, 3, { mid: -28, high: -32 });
+    const r = run(note);
+    expect(r.fires).toEqual([]);
+    expect(r.softs).toEqual([note[200].t]);
+  });
+
+  it("takes a host onset with no noise or kick under it for a soft hit, not a hop", () => {
+    const fr = floor(260, { mid: -40, high: -45 }).map((f) => ({ ...f, tonal: true }));
+    setFrames(fr, 200, 1, { onset: true, strength: 0.9, age: 0.004 });
+    const r = run(fr);
+    expect(r.fires).toEqual([]);
+    expect(r.softs).toEqual([fr[200].t]);
+  });
+
+  it("hops on a bass rise only with the kick body (150–400 Hz) rising and the bass dominating the spectrum", () => {
+    const tonal = (/** @type {Frame} */ f) => ({ ...f, tonal: true, body: -50, lowTop: -50 });
+    const kick = floor(260).map(tonal);
+    setFrames(kick, 200, 3, { low: -26, body: -34, lowTop: -34 });
+    expect(run(kick).fires).toEqual([kick[200].t]);
+    // An 808 note or a sidechained bass swelling back: the low end rises, the body does not.
+    const swell = floor(260).map(tonal);
+    setFrames(swell, 200, 3, { low: -26 });
+    const r = run(swell);
+    expect(r.fires).toEqual([]);
+    expect(r.softs).toEqual([swell[200].t]);
+    // A low rise under a louder mid band (a sung or bowed note's fundamental): not a kick.
+    const voice = floor(260, { mid: -20 }).map(tonal);
+    setFrames(voice, 200, 3, { low: -26, body: -34, lowTop: -34 });
+    expect(run(voice).fires).toEqual([]);
+  });
+
+  it("hops on a kick over a constant heavy bass whose busy low band keeps the z score under Z", () => {
+    // A loud bass line wobbling ±2.5 dB: its spread keeps a 4 dB kick's z score low, but the rise per
+    // bin, the band rise and the body make it a kick.
+    const fr = floor(400, { low: -14 }).map((f, k) => ({ ...f, tonal: true, low: -14 + [0, 2.5, -2, 1.5, -2.5, 2, 0.5, -1][k % 8], body: -45, lowTop: -45 }));
+    for (let k = 300; k < 303; k++) Object.assign(fr[k], { low: -14 + K_FLUX + 1.5, body: -30, lowTop: -30 });
+    const r = run(fr);
+    expect(r.fires).toEqual([fr[300].t]);
+  });
+});
+
