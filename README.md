@@ -81,28 +81,36 @@ slightly, and silence freezes the last figure where it lies. Renderer: `webgl2`.
   or with a host onset at most 30 ms old, of a low band at −40 dB or louder; or a low rise of 3 dB
   with a mean rise of 3 dB per low bin of a band at −30 dB or louder, whatever its z score (a kick
   over a busy, heavy bass line); or a mid rise (z ≥ 3, ≥ 3 dB) on a spectrum that is not hat-like
-  (mid more than 3 dB under high). A candidate hits only as a **kick** (a low rise with the bass
-  dominating the spectrum, low level at most 4 dB under the whole spectrum's, and the body band
-  rising 2 dB, or the beater's click: a 1 dB mid rise on a not hat-like spectrum whose 1–5 kHz
-  flatness is 0.15 or more) or as a **noise burst** (a 3 dB mid rise on a not hat-like spectrum
-  whose 1–5 kHz flatness, the geometric over the arithmetic mean power of every other bin, is 0.28
-  or more: a snare, clap or stomp, not a sung or played note). Every other candidate, and a host
-  onset of strength ≥ 0.6 on a non-hat spectrum, is a soft hit (at most one per 0.07 s): it does
-  not hop. Hits are at least 0.07 s apart, and within 0.12 s of the last one a new hit needs a
-  bigger low rise per bin (after a hit lighter than 0.65) or a broad mid rise (6 dB in half of
-  eight mid sub-bands: a snare or clap, not a cowbell or the kick's own tail). The weight is how
-  much bass arrives with the hit: the low level mapped from −28..−10 dB to 0–1, times the mean rise
-  of the low bins (each over its own lowest level of the last 35 ms) mapped from 1..3.5 dB to 0–1,
-  so a kick on a ringing 808 counts even when a limiter holds the band's level. Level and rise may
-  grow for 43 ms (one FFT window) while the kick's low end fills it.
+  (mid more than 3 dB under high). A candidate hits only as a **kick** (a z-scored low rise with
+  the bass dominating the spectrum, low level at most 4 dB under the whole spectrum's, and the
+  body band rising 2 dB on that frame or up to 40 ms before it, since a kick's pitch falls through
+  the body into the bass; or the beater's click: a 1 dB mid rise on a not hat-like spectrum whose
+  1–5 kHz flatness is 0.15 or more; or a kick into a ringing 808, which can dip the low band while
+  its bins rise: a mean rise of 6 dB per low bin with a 5 dB body rise and a 2 dB mid rise) or as
+  a **noise burst** (a 3 dB mid rise on a not hat-like spectrum whose 1–5 kHz flatness, the
+  geometric over the arithmetic mean power of every other bin, is 0.28 or more: a snare, clap or
+  stomp, not a sung or played note). A kick that only the z-less path sees (with the bass
+  dominating and the body or click rising) waits one analysis frame, at most 35 ms, and hits there
+  if the low level held or rose: a kick keeps filling the FFT window, while a busy bass line's peak
+  falls back. Every other candidate, and a host onset of strength ≥ 0.6 on a non-hat spectrum, is
+  a soft hit (at most one per 0.07 s): it does not hop. Hits are at least 0.07 s apart, and within
+  0.12 s of the last one a new hit needs a bigger low rise per bin (after a hit lighter than 0.65)
+  or a broad mid rise (6 dB in half of eight mid sub-bands: a snare or clap, not a cowbell or the
+  kick's own tail). The weight is how much bass arrives with the hit: the low level mapped from
+  −28..−10 dB to 0–1, times the mean rise of the low bins (each over its own lowest level of the
+  last 35 ms) mapped from 1..3.5 dB to 0–1, so a kick on a ringing 808 counts even when a limiter
+  holds the band's level. Level and rise may grow for 43 ms (one FFT window) while the kick's low
+  end fills it.
   Replayed on five real songs and nine synthetic tracks at 60 and 144 fps and with ±50% frame-time
   jitter, scoring one hop per hit against offline reference kicks and snares (−40..+60 ms):
-  67–86% of the hops on the four drum-driven songs land on a reference kick or snare (the build
-  before this gate: 45–70%), and 75–98% of their reference kicks hop; on the synthetic tracks hats,
-  cowbells and rides alone take 0–4% of the hops (up to 12% on hip-hop at 144 fps), except
-  edm128's pumping bass under its off-beat open hats (16–21%). What still hops off the reference
-  is mostly a real but quieter hit, or a bass note or swell that passes for a kick (pop-rock's
-  bass-guitar 8ths: 47–58% of its hops land on no kick or snare).
+  69–86% of the hops on the four drum-driven songs land on a reference kick or snare (the build
+  before the kick/noise gate: 45–70%), and 79–98% of their reference kicks hop; on the synthetic
+  tracks hats, cowbells and rides alone take 0–5% of the hops, except edm128, whose pumped reese
+  bass swells back between kicks (17%). What still hops off the reference is mostly a bass hit or
+  a 1–5 kHz onset the reference drops (on the bass test at 60 fps, 58 of the 149 off-reference hops
+  (39%) sit on a bass hit it rejected for rising less than 3 dB; random times would give 24%), or
+  a bass note that passes for a kick (pop-rock's bass-guitar 8ths: 37–51% of its hops land on no
+  kick or snare).
 - **Hops** (`sand.js` `createHop`): a hit of weight w launches 0.9 + 0.1·w of the grounded grains
   with vz0 = g·0.075·hop·(0.4 + 0.6·w) (a 0.15 s flight at w = 1) and hashed lateral scatter
   0.12·hop·w²; a grow re-sends the bigger hop under the same sequence number with the share
@@ -150,10 +158,10 @@ slightly, and silence freezes the last figure where it lies. Renderer: `webgl2`.
   carries the light its grains gave on the ground. Figure changes are always crossfades of 0.4 s
   or longer, never cuts. Measured on harness renders on slate with Backdrop none (128k grains,
   complexity 1.5, reactivity 2): a hop's first frame changes the mean luma by at most 2.0 of 255
-  levels on five real songs and the harness sources (2.3 at Hop 2), any screen quarter by at most
-  3.1, a hop's largest swell (scattered sand not yet back in the lines) is at most 2.2 levels for
-  a light hop and 2.3 for a heavy one (2.6 at Hop 2), and only the Hop 2 run makes a 3-level
-  excursion (at most one a second). With the figure held on the finest figure, a weight-0.3 hop
+  levels on five real songs and 2.5 on the harness sources (2.3 at Hop 2), any screen quarter by
+  at most 3.1, a hop's largest swell (scattered sand not yet back in the lines) is at most 2.5
+  levels for a light hop and 2.3 for a heavy one (2.6 at Hop 2), and only the Hop 2 run makes a
+  3-level excursion (at most one a second). With the figure held on the finest figure, a weight-0.3 hop
   swells by at most 1.9 levels, a weight-0.7 hop by 3.1 and a full one by 4.2 over about ten
   frames.
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
