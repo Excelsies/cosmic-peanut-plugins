@@ -2,8 +2,11 @@
 import { describe, expect, it } from "vitest";
 import {
   A_AGE,
+  A_FLOOR,
   A_STRONG,
   binOf,
+  BROAD_DB,
+  BROAD_SHARE,
   C_MIN,
   createHits,
   FLUX_MIN,
@@ -12,11 +15,16 @@ import {
   HIST,
   LOW_HZ,
   MID_HZ,
+  MID_SPLIT,
+  midSplit,
+  REFIRE,
+  REFIRE_W,
   REFRACTORY,
   S_HAT_DB,
   W_HI,
   W_LO,
-  W_RISE,
+  W_RISE_HI,
+  W_RISE_LO,
   WEIGHT_WIN,
   Z,
   Z_FLOOR,
@@ -30,11 +38,16 @@ const WOBBLE = [0, 0.3, -0.2, 0.1, -0.3, 0.2];
 
 /**
  * @typedef {{ t: number, i: number, low: number, mid: number, high: number,
- *   onset?: boolean, strength?: number, age?: number, silent?: boolean }} Frame
+ *   onset?: boolean, strength?: number, age?: number, silent?: boolean,
+ *   lowBins?: number[], narrow?: boolean }} Frame
+ * lowBins: per-bin levels (dB) of the low band instead of `low` spread evenly over its bins;
+ * narrow: `mid` in one mid sub-band (a cowbell) instead of spread evenly over all of them (a snare).
  */
 
-/** One bin per band carries the band's whole level: 10·log10(a²) = dB. @param {number} db */
+/** Amplitude of a bin at `db`: 10·log10(a²) = dB. @param {number} db */
 const amp = (db) => Math.sqrt(10 ** (db / 10));
+const LOW_BINS = [binOf(LOW_HZ[0], SR), binOf(LOW_HZ[1], SR)];
+const SPLIT = midSplit(SR);
 
 /** An AudioFrame-shaped object for createHits. */
 function makeAudio() {
@@ -50,11 +63,17 @@ function makeAudio() {
   };
 }
 
-/** @param {ReturnType<typeof makeAudio>} a @param {Frame} f */
+/**
+ * The band levels as a spectrum: the low band's level spread evenly over its bins (or per bin from
+ * lowBins), the mid band's over the first bin of each sub-band (or all in the first, `narrow`), the
+ * high band's in one bin. @param {ReturnType<typeof makeAudio>} a @param {Frame} f
+ */
 function load(a, f) {
   a.spectrum.fill(0);
-  a.spectrum[binOf(LOW_HZ[0], a.sampleRate)] = amp(f.low);
-  a.spectrum[binOf(MID_HZ[0], a.sampleRate)] = amp(f.mid);
+  const nLow = LOW_BINS[1] - LOW_BINS[0] + 1;
+  for (let i = 0; i < nLow; i++) a.spectrum[LOW_BINS[0] + i] = amp(f.lowBins ? f.lowBins[i] : f.low - 10 * Math.log10(nLow));
+  if (f.narrow) a.spectrum[SPLIT[0]] = amp(f.mid);
+  else for (let k = 0; k < MID_SPLIT; k++) a.spectrum[SPLIT[k]] = amp(f.mid - 10 * Math.log10(MID_SPLIT));
   a.spectrum[binOf(HIGH_HZ[0], a.sampleRate)] = amp(f.high);
   a.frameIndex = f.i;
   a.hostTime = f.t;
@@ -142,9 +161,10 @@ function setFrames(fr, k, n, set) {
 
 describe("hits constants", () => {
   it("exports the tuned constants", () => {
-    expect([FLUX_SPAN, HIST, Z_FLOOR, Z, FLUX_MIN, A_STRONG, A_AGE, S_HAT_DB, C_MIN, REFRACTORY, WEIGHT_WIN, W_LO, W_HI, W_RISE]).toEqual([
-      0.035, 2, 0.5, 3, 3, 6, 0.03, -3, 0.6, 0.07, 0.043, -28, -10, 4,
+    expect([FLUX_SPAN, HIST, Z_FLOOR, Z, FLUX_MIN, A_STRONG, A_AGE, S_HAT_DB, C_MIN, REFRACTORY, REFIRE, WEIGHT_WIN, W_LO, W_HI]).toEqual([
+      0.035, 2, 0.5, 3, 3, 6, 0.03, -3, 0.6, 0.07, 0.12, 0.043, -28, -10,
     ]);
+    expect([W_RISE_LO, W_RISE_HI, MID_SPLIT, BROAD_DB, BROAD_SHARE, REFIRE_W, A_FLOOR]).toEqual([1, 3.5, 8, 6, 0.5, 0.65, -40]);
   });
 
   it("derives the band bins from the sample rate", () => {
@@ -159,6 +179,11 @@ describe("hits constants", () => {
       [46, 232],
       [279, 697],
     ]);
+  });
+
+  it("splits the mid band into MID_SPLIT log-spaced sub-bands", () => {
+    expect([...midSplit(48000)]).toEqual([43, 53, 64, 78, 96, 117, 143, 175, 214]);
+    expect([...midSplit(44100)]).toEqual([46, 56, 69, 85, 104, 127, 155, 190, 233]);
   });
 });
 
@@ -195,23 +220,23 @@ describe("createHits", () => {
     }
   });
 
-  it("scales the weight by how far the low band rose: a hit over a sustained bass weighs nothing", () => {
+  it("scales the weight by the low band's mean rise per bin: a hit over a sustained bass weighs nothing", () => {
     // A snare (mid step) over a steady loud low band: the bass is heavy but did not arrive with the hit.
     const held = floor(260, { low: -12, flat: true });
     setFrames(held, 200, 3, { mid: -28, high: -32 });
     const a = run(held);
     expect(a.fires).toEqual([held[200].t]);
     expect(a.weights[0]).toBe(0);
-    // The same snare with the low band 2 dB up from its floor: half of the level's weight (W_RISE 4 dB).
+    // Every low bin up 2.25 dB: half way from W_RISE_LO to W_RISE_HI, so half of the level's weight.
     for (const [from, to] of [
-      [-24, -22],
-      [-12, -10],
+      [-24.25, -22],
+      [-12.25, -10],
     ]) {
       const fr = floor(260, { low: from, flat: true });
       setFrames(fr, 200, 3, { low: to, mid: -28, high: -32 });
       const b = run(fr);
       expect(b.fires).toEqual([fr[200].t]);
-      expect(b.weights[0]).toBeCloseTo(((to - W_LO) / (W_HI - W_LO)) * (2 / W_RISE), 6);
+      expect(b.weights[0]).toBeCloseTo(((to - W_LO) / (W_HI - W_LO)) * ((2.25 - W_RISE_LO) / (W_RISE_HI - W_RISE_LO)), 5);
     }
     // A rise that lands on the frames after the fire grows the weight to the full level weight.
     const late = floor(260, { low: -24, flat: true });
@@ -221,6 +246,20 @@ describe("createHits", () => {
     expect(c.fires).toEqual([late[200].t]);
     expect(c.grows).toEqual([late[201].t]);
     expect(c.out.weight).toBeCloseTo(2 / 3, 6);
+  });
+
+  it("weighs a kick on a ringing 808 by the bass level, though the band level holds", () => {
+    // The 808 rings in the lowest bins; the kick fills the upper low bins while a limiter keeps the
+    // band level where it was (-11.5 dB). The band does not rise, its bins do: full weight at the level.
+    const ring = [-14, -16, -22, -40, -40, -40];
+    const kick = [-16, -18, -24, -20, -20, -20];
+    const level = (/** @type {number[]} */ b) => 10 * Math.log10(b.reduce((e, x) => e + 10 ** (x / 10), 0));
+    expect(level(kick)).toBeCloseTo(level(ring), 0);
+    const fr = floor(260, { flat: true }).map((f) => ({ ...f, lowBins: ring }));
+    setFrames(fr, 200, 3, { lowBins: kick, mid: -28, high: -32 });
+    const { fires, out } = run(fr);
+    expect(fires).toEqual([fr[200].t]);
+    expect(out.weight).toBeCloseTo((level(kick) - W_LO) / (W_HI - W_LO), 5);
   });
 
   it("evaluates a repeated frameIndex once", () => {
@@ -239,16 +278,30 @@ describe("createHits", () => {
     expect(run(busy.flatMap((f) => [f, f, f])).fires).toEqual([]);
   });
 
-  it("fires at most once per 0.07 s", () => {
-    for (const [gap, n] of [
-      [5, 1],
-      [8, 2],
-    ]) {
-      const fr = floor(260, { dt: 0.01 });
-      setFrames(fr, 200, 2, { low: -28 });
-      setFrames(fr, 200 + gap, 2, { low: -28 });
-      expect(run(fr).fires).toHaveLength(n);
-    }
+  it("fires at most once per 0.07 s, and within 0.12 s only on a bigger low rise or a broad mid rise", () => {
+    /** @param {number} gap frames (10 ms) @param {Partial<Frame>} first @param {Partial<Frame>} second */
+    const pair = (gap, first, second) => {
+      const fr = floor(260, { dt: 0.01, flat: true });
+      setFrames(fr, 200, 2, first);
+      setFrames(fr, 200 + gap, 2, second);
+      return run(fr).fires.length;
+    };
+    const kick = { low: -28 };
+    expect(pair(5, kick, kick)).toBe(1); // inside the 0.07 s refractory
+    expect(pair(8, kick, kick)).toBe(1); // the same low rise again 80 ms on: the kick's own tail
+    expect(pair(13, kick, kick)).toBe(2); // 130 ms apart: two hits
+    expect(pair(8, { mid: -28, high: -32 }, kick)).toBe(2); // snare, then a kick a 16th later
+    expect(pair(8, { low: -33 }, { low: -22 })).toBe(2); // a light low hit, then a heavier one
+    expect(pair(8, { low: -14 }, { low: -2 })).toBe(1); // a heavy hit (w 0.78), then more of its swell
+    expect(pair(8, kick, { mid: -28, high: -32 })).toBe(2); // kick, then a snare (broad mid rise)
+    expect(pair(8, kick, { mid: -28, high: -32, narrow: true })).toBe(1); // kick, then a cowbell
+    expect(pair(5, kick, { mid: -28, high: -32 })).toBe(1); // nothing inside the refractory
+  });
+
+  it("does not take a low rise out of near silence (under A_FLOOR) for a bass hit", () => {
+    const fr = floor(260, { low: -70, flat: true });
+    setFrames(fr, 200, 3, { low: -58, age: 0.01 });
+    expect(run(fr).fires).toEqual([]);
   });
 
   it("needs a host onset within 30 ms for a low rise under 6 dB", () => {
