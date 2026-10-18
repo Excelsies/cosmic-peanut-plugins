@@ -135,6 +135,51 @@ export function createHop() {
 }
 
 /**
+ * A hop waiting for the next simulation step (a 144 Hz frame may run none). A grow of the same hit
+ * merges by max (the share already launched by min); a new hit (`seq` changed) replaces whatever
+ * is pending, so a light hit never inherits the last one's size.
+ */
+export function createHopQueue() {
+  let vz = 0;
+  let scatter = 0;
+  let fraction = 0;
+  let launched = 0;
+  let seq = 0;
+  let pending = false;
+  return {
+    /** @param {{ impulse: number, scatter: number, fraction: number, launched: number, seq: number }} hp createHop().step's result */
+    add(hp) {
+      if (!(hp.impulse > 0)) return;
+      if (pending && hp.seq === seq) {
+        launched = Math.min(launched, hp.launched);
+        vz = Math.max(vz, hp.impulse);
+        scatter = Math.max(scatter, hp.scatter);
+        fraction = Math.max(fraction, hp.fraction);
+      } else {
+        vz = hp.impulse;
+        scatter = hp.scatter;
+        fraction = hp.fraction;
+        launched = hp.launched;
+      }
+      seq = hp.seq;
+      pending = true;
+    },
+    /**
+     * Fill `u` (vz0, scatter, share up to which to launch, share already launched) for one step and
+     * clear the queue; returns the seq that seeds the launch hash. @param {Float32Array} u
+     */
+    take(u) {
+      u[0] = pending ? vz : 0;
+      u[1] = pending ? scatter : 0;
+      u[2] = pending ? fraction : 0;
+      u[3] = pending ? launched : 0;
+      pending = false;
+      return seq;
+    },
+  };
+}
+
+/**
  * Smoothed plate excitation from one audio frame. `step` returns the same object every call:
  * - drive: k + h·tanh(K_PULSE·pulseGain·pulse·k / h), with k = knee(base) and h = DRIVE_PEAK·
  *   reactivity − k the headroom, where base = silent ? 0 : clamp(0.5·min(midAtt, 2) + 4·rms, 0,

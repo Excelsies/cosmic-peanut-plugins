@@ -1,6 +1,6 @@
 // @ts-check
 import { describe, expect, it } from "vitest";
-import { createHop, createPlateDrive, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
+import { createHop, createHopQueue, createPlateDrive, DRIVE_CEIL, DRIVE_KNEE, DRIVE_PEAK, F_MIN, flightTime, GRAIN_FLOATS, GRAVITY, HAZE_PEAK, hopVz0, K_PULSE, PULSE_BASE, PULSE_TAU, SCATTER, seedGrains, W_HAZE } from "./sand.js";
 
 const DT = 1 / 60;
 
@@ -195,6 +195,32 @@ describe("hop", () => {
 
 /** @param {Partial<Record<string, any>>} over */
 const audio = (over = {}) => ({ midAtt: 1, rms: 0.1, silent: false, trebAtt: 1, flux: 0, bassAtt: 1, ...over });
+
+describe("createHopQueue", () => {
+  /** @param {number} impulse @param {number} fraction @param {number} launched @param {number} seq */
+  const hp = (impulse, fraction, launched, seq) => ({ impulse, scatter: impulse / 10, fraction, launched, seq, haze: 0 });
+
+  it("holds a hop until the next simulation step, merging a grow of the same hit by max", () => {
+    const q = createHopQueue();
+    const u = new Float32Array(4);
+    q.add(hp(0.15, 0.5, 0, 1));
+    q.add(hp(0, 0, 0, 1)); // a frame with no hop changes nothing
+    q.add(hp(0.25, 0.8, 0.5, 1)); // its grow, before any step ran
+    expect(q.take(u)).toBe(1);
+    expect([...u].map((x) => Math.round(x * 1e6) / 1e6)).toEqual([0.25, 0.025, 0.8, 0]);
+    expect(q.take(u)).toBe(1); // the next step launches nothing, under the same seq
+    expect([...u]).toEqual([0, 0, 0, 0]);
+  });
+
+  it("starts over when a new hit arrives before a step: a light hit does not inherit the last one's size", () => {
+    const q = createHopQueue();
+    const u = new Float32Array(4);
+    q.add(hp(0.3, 1, 0.6, 4)); // a grow of hit 4 still pending
+    q.add(hp(0.12, 0.5, 0, 5)); // hit 5, light
+    expect(q.take(u)).toBe(5);
+    expect([...u].map((x) => Math.round(x * 1e6) / 1e6)).toEqual([0.12, 0.012, 0.5, 0]);
+  });
+});
 
 describe("createPlateDrive", () => {
   it("drives clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5) · reactivity, frame-rate independent", () => {

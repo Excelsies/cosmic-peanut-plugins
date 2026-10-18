@@ -25,6 +25,7 @@ import { createModeGate, createPitch } from "./lib/pitch.js";
 import {
   AIR_DRAG,
   createHop,
+  createHopQueue,
   createPlateDrive,
   DAMPING,
   G_TILT,
@@ -151,13 +152,7 @@ export default async function create(ctx) {
   const k = new Float32Array([K_DRIFT, K_SHAKE, K_FIZZ, G_TILT]);
   const k2 = new Float32Array([DAMPING, AIR_DRAG, RESTITUTION, GRAVITY]);
   let stepCount = 0;
-  // A hop waits here until the next simulation step (a 144 Hz frame may run none); hops and grows
-  // that arrive meanwhile merge by max (the share already launched by min).
-  let pendingVz = 0;
-  let pendingScatter = 0;
-  let pendingFraction = 0;
-  let pendingLaunched = 0;
-  let seq = 0;
+  const queue = createHopQueue();
 
   return {
     frame(audio, time) {
@@ -174,13 +169,7 @@ export default async function create(ctx) {
       const balance = -stereoFrame(audio.left, audio.right, stereo).balance;
       const hp = hop.step(hit, res.hop, dt, ctx.reduceFlashing);
       const pd = plateDrive.step(audio, balance, res.reactivity, res.bassTilt, res.pulse, hit, dt);
-      if (hp.impulse > 0) {
-        pendingLaunched = pendingFraction > 0 ? Math.min(pendingLaunched, hp.launched) : hp.launched;
-        pendingVz = Math.max(pendingVz, hp.impulse);
-        pendingScatter = Math.max(pendingScatter, hp.scatter);
-        pendingFraction = Math.max(pendingFraction, hp.fraction);
-        seq = hp.seq;
-      }
+      queue.add(hp);
 
       // 1. Update: 0–4 fixed steps through transform feedback.
       const steps = clock.advance(dt);
@@ -206,17 +195,9 @@ export default async function create(ctx) {
         gl.uniform4fv(u.u_k, k);
         gl.uniform4fv(u.u_k2, k2);
         gl.uniform4fv(u.u_tilt, tilt);
-        gl.uniform1ui(u.u_seq, seq);
         gl.enable(gl.RASTERIZER_DISCARD);
         for (let s = 0; s < steps; s++) {
-          hopU[0] = pendingVz;
-          hopU[1] = pendingScatter;
-          hopU[2] = pendingFraction;
-          hopU[3] = pendingLaunched;
-          pendingVz = 0;
-          pendingScatter = 0;
-          pendingFraction = 0;
-          pendingLaunched = 0;
+          gl.uniform1ui(u.u_seq, queue.take(hopU));
           gl.uniform4fv(u.u_hop, hopU);
           gl.uniform1ui(u.u_step, stepCount++ >>> 0);
           const next = 1 - cur;
