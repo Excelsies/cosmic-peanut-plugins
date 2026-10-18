@@ -37,14 +37,15 @@ Sand on a ringing brass plate. The window is the plate, edge to edge: warm brush
 static diagonal sheen, and dark iron filings that gather into the standing-wave figure of the note
 you hear (lattices, crosses, nested diamonds, curved butterflies). Higher notes give finer figures
 with more cells. When the note changes the two figures crossfade over 0.4 s and the sand visibly
-streams from the old lines to the new ones. Every kick, snare, clap or stomp makes the sand hop,
-and the more bass arrives with the hit, the bigger the hop: a snare over a steady bass lifts a
-third of the grains a little way, a kick that lifts the bass throws them all up and scatters them,
-and the lines go soft for up to 150 ms before the sand lands and re-sharpens. A hop moves the sand
-without brightening it; only heavy hits carry a faint haze, and under Reduce flashing at most three
-of those a second. The plate also shakes harder on each hit, so between hops the sand keeps moving
-with the beat. Music with no drums gets small hops on its note attacks. Hats add a fine fizz, bass and stereo balance
-tilt the plate slightly, and silence freezes the last figure where it lies. Renderer: `webgl2`.
+streams from the old lines to the new ones. Every kick, snare, clap or stomp makes the sand hop:
+part of the grains leap off the lines and you see them rise and fall back, and the more bass
+arrives with the hit, the bigger the hop: a snare over a steady bass lifts half of the grains a
+short way, a heavy kick lifts all of them about 30 px (on a 720 px window) and scatters them. A hop
+moves the sand's light around instead of adding to it; only heavy hits carry a faint haze, and
+under Reduce flashing at most three of those a second. The plate also shakes harder on each hit.
+Music with no drums gets small hops on its note attacks. Hats add a fine fizz, bass and stereo
+balance tilt the plate slightly, and silence freezes the last figure where it lies. Renderer:
+`webgl2`.
 
 ### Parameters
 
@@ -75,25 +76,30 @@ tilt the plate slightly, and silence freezes the last figure where it lies. Rend
   three bands of the spectrum: low 23–141 Hz (kick, 808), mid 1–5 kHz (snare, clap, stomp) and
   high 6–15 kHz (hats). A band's flux is its rise over the lowest level of the last 35 ms, judged
   as a robust z score against its own last 2 s: (flux − median)/(1.4826·MAD + 0.5). A hit is a low
-  rise (z ≥ 3, ≥ 3 dB) of 6 dB or more, or with a host onset at most 30 ms old; or a mid rise
-  (z ≥ 3, ≥ 3 dB); or a host onset of strength ≥ 0.6; the last two not on a hat-like spectrum
-  (mid more than 3 dB under high). Hits are at least 0.07 s apart. The weight is how much bass
-  arrives with the hit: the low level mapped from −28..−10 dB to 0–1, times the low band's rise
-  over its floor before the hit, full at 4 dB, so a hat or cowbell over a ringing 808 weighs about
-  nothing. It may grow for 43 ms (one FFT window) while the kick's low end fills the window.
-  Replayed on five real songs at 60 and 144 fps, scoring one hop per hit, 90–98% of the reference
-  kicks on the four drum-driven songs and 73–96% of the beat hits hop (all of them on most
-  synthetic tracks), and kicks weigh more than snares on every drum-driven song.
-- **Hops** (`sand.js` `createHop`): a hit of weight w launches 0.3 + 0.7·w of the grounded grains
+  rise (z ≥ 3, ≥ 3 dB) of 6 dB or more, or with a host onset at most 30 ms old, of a low band at
+  −40 dB or louder; or a mid rise (z ≥ 3, ≥ 3 dB); or a host onset of strength ≥ 0.6; the last two
+  not on a hat-like spectrum (mid more than 3 dB under high). Hits are at least 0.07 s apart, and
+  within 0.12 s of the last one a new hit needs a bigger low rise per bin (after a hit lighter
+  than 0.65) or a broad mid rise (6 dB in half of eight mid sub-bands: a snare or clap, not a
+  cowbell or the kick's own tail). The weight is how much bass arrives with the hit: the low level
+  mapped from −28..−10 dB to 0–1, times the mean rise of the low bins (each over its own lowest
+  level of the last 35 ms) mapped from 1..3.5 dB to 0–1, so a kick on a ringing 808 counts even
+  when a limiter holds the band's level, while a hat or cowbell over the same 808 weighs about
+  nothing. Level and rise may grow for 43 ms (one FFT window) while the kick's low end fills it.
+  Replayed on five real songs at 60 and 144 fps, scoring one hop per hit, 85–98% of the reference
+  kicks on the four drum-driven songs and 68–99% of the beat hits hop, and kicks weigh more than
+  snares on every song.
+- **Hops** (`sand.js` `createHop`): a hit of weight w launches 0.5 + 0.5·w of the grounded grains
   with vz0 = g·0.075·hop·(0.4 + 0.6·w) (a 0.15 s flight at w = 1) and hashed lateral scatter
   0.12·hop·w²; a grow re-sends the bigger hop under the same sequence number with the share
-  already launched, so only the grains between the two shares go up. Hits over w = 0.7 raise the haze to 0.25·(w − 0.7)/0.3, held through the 43 ms
-  window, then decaying with τ 0.15 s.
-- **Audio mapping** (`sand.js` `createPlateDrive`): drive = knee(base)·(1 + pulse), at most
-  3·reactivity, where base = clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5)·reactivity (τ 0.1 s, 0
-  within 0.3 s of silence), knee bends base/reactivity above 1 toward 1.5 (tanh) so that loud
-  songs keep room for the pulse, and pulse jumps to 0.4 + 0.6·w on each hit and decays with
-  τ 0.12 s;
+  already launched, so only the grains between the two shares go up. A hop waits for the next
+  simulation step (`createHopQueue`); a new hit replaces a pending one. Hits over w = 0.7 raise the
+  haze to 0.25·(w − 0.7)/0.3, held through the 43 ms window, then decaying with τ 0.15 s.
+- **Audio mapping** (`sand.js` `createPlateDrive`): drive = k + h·tanh(1.5·pulse·k/h), where
+  k = knee(base), h = 3·reactivity − k, base = clamp(0.5·min(midAtt, 2) + 4·rms, 0, 2.5)·reactivity
+  (τ 0.1 s, 0 within 0.3 s of silence), the knee bends base/reactivity above 1.25 toward 2 (tanh)
+  so that loud songs keep room, and pulse jumps to 0.4 + 0.6·w on each hit and decays with
+  τ 0.12 s: a full hit reaches about the cap and never less than the unkneed base;
   fizz = clamp(trebAtt − 1, 0, 2)·0.5 + flux·0.5; bass tilt 0.15·clamp(bassAtt − 1, −1, 1)
   (τ 0.3 s); stereo tilt 0.6·balance·reactivity (τ 0.5 s, `stereo.js`, exactly 0 for mono or
   bit-identical L/R, as with the app's synthetic sources).
@@ -106,14 +112,17 @@ tilt the plate slightly, and silence freezes the last figure where it lies. Rend
   ballistically with air drag only. Edges reflect with restitution 0.3. Noise is a PCG hash of
   (vertex id, step), initial positions are hash-uniform: runs are deterministic, no `Math.random`.
 - **Deposit**: one additive POINTS pass into a half-resolution `RGBA16F` density target (R
-  grounded, 1 px; G airborne, 2 px), weights scaled by target area and grain count. Without
-  `EXT_color_buffer_float` it falls back to `RGBA8` at 4/255 per grain, which saturates sooner.
+  grounded, G airborne where it took off; 1 px each), weights scaled by target area and grain
+  count. A second pass (`lift.vert`) draws the airborne grains again into a second target, lifted on
+  screen by 0.4·z^0.5 plate heights, up and a little toward the light, each carrying the light it
+  gave in place (read from the first target through the composite's blur and coverage curve).
+  Without `EXT_color_buffer_float` both fall back to `RGBA8` at 4/255 per grain, which saturates
+  sooner.
 - **Composite** (`composite.frag`): one full-resolution pass. Coverage h = 1 − exp(−1.6·R) from 5
   taps, a normal from the central-difference slope, Lambert light from the upper left plus a rim
-  term, so ridges get a thin highlight and cast a thin shadow on the plate. On the plate, dust is
-  drawn a touch lighter and softer with a small offset shadow, scaled by 0.65 + 0.35·haze. With
-  Backdrop none the dust covers what the same grains covered on the ground: its splat is converted
-  to grounded mass and goes through the same coverage curve, at 0.85 of the sand colour, so a hop
+  term, so ridges get a thin highlight and cast a thin shadow on the plate. On the plate, the
+  lifted dust is drawn a touch lighter with a small offset shadow, scaled by 0.65 + 0.35·haze. With
+  Backdrop none the lifted dust gives the light it carried, at 0.85 of the sand colour, so a hop
   moves light around instead of adding it, on fine figures as on coarse ones; the haze (0–0.25)
   lifts it by up to 7.5%. The plate (gradient, anisotropic hash brushing, sheen) never reacts to
   audio.
@@ -123,25 +132,29 @@ tilt the plate slightly, and silence freezes the last figure where it lies. Rend
 - **Reduce flashing** (on by default): the haze of heavy hits goes through the photosensitivity
   limiter (`lib/flash.js`, a copy of the built-in one, at most 3 rises per second). A heavy hit it
   refuses still hops, at weight 0.7 and with no haze; with Reduce flashing off nothing is
-  downgraded. The drive pulse moves the sand without changing its brightness. Figure changes are
-  always crossfades of 0.4 s or longer, never cuts. Measured on harness renders on slate with
-  Backdrop none: a hop's first frame changes the mean luma by at most 0.8 of 255 levels on five
-  real songs and the harness sources (0.9 at Hop 2), and a hop's largest swell (from scattered
-  sand that has not yet drifted back into the lines) is at most 2.8 levels. With the figure held,
-  a weight-0.3 hop swells by at most 1.5 levels and a weight-0.7 hop by at most 2.5 on the finest figure, and a
-  5 Hz train of full-weight hits never makes a 3-level flash.
+  downgraded. The drive pulse moves the sand without changing its brightness, and the lifted dust
+  carries the light its grains gave on the ground. Figure changes are always crossfades of 0.4 s
+  or longer, never cuts. Measured on harness renders on slate with Backdrop none (128k grains,
+  complexity 1.5, reactivity 2): a hop's first frame changes the mean luma by at most 1.5 of 255
+  levels on five real songs and the harness sources (2.1 at Hop 2), any screen quarter by at most
+  2.6, a hop's largest swell (scattered sand not yet back in the lines) is at most 2.6 levels for
+  a light hop and 2.1 for a heavy one (2.7 at Hop 2), and no run makes a 3-level flash. With the
+  figure held on the finest figure, a weight-0.3 hop swells by at most 1.4 levels, a weight-0.7
+  hop by 2.8 and a full one by 4.2 over about ten frames.
 - **Reduce motion**: crossfades take 1 s; while Reactivity is at its default, the plate runs at
   reactivity 0.5, hops at half height, the drive pulse and the bass tilt are off.
 
 ### Performance
 
-Per frame: the pitch scan (~80 bins), 1–4 transform-feedback steps over 64k grains, one POINTS
-pass at half resolution and one full-resolution composite with 7 texture taps. Per new analysis
-frame (about 94 a second), the hit detector sums three spectrum bands (~600 bins) and sorts two
-256-entry history buffers twice each for their median and MAD. `frame()` allocates
+Per frame: the pitch scan (~80 bins), 1–4 transform-feedback steps over 64k grains, two POINTS
+passes at half resolution (the second draws only the airborne grains, with 5 texture taps each)
+and one full-resolution composite with 12 texture taps. Per new analysis frame (about 94 a
+second), the hit detector sums three spectrum bands (~600 bins), compares the low bins and eight
+mid sub-bands with their last 35 ms, and sorts two 256-entry history buffers twice each for their
+median and MAD. `frame()` allocates
 nothing: uniforms come from preallocated `Float32Array`s (mode entries via `uniform4fv` with a
 source offset), and every lib returns reused objects. `dispose()` deletes 2 buffers, 2 transform
-feedback objects, 3 VAOs, 3 programs and the density texture and framebuffer.
+feedback objects, 3 VAOs, 4 programs and the two density textures and framebuffers.
 
 ## Murmuration
 
